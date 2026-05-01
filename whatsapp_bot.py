@@ -160,8 +160,16 @@ TRUST_KW    = ["ثقة","واش حقيقي","serious","arnaque","مضمون","s�
 
 def detect_intent(text):
     t = text.lower().strip()
+    words = set(re.split(r'\s+', t))
+    # --- GREETING first (prevents "سلام" → cancel via "لا" substring) ---
+    for kw in GREETING_KW:
+        if kw in t: return "greeting"
+    # --- CANCEL: exact-word match for short words like "لا" ---
     for kw in CANCEL_KW:
-        if kw in t: return "cancel"
+        if len(kw) <= 2:
+            if kw in words: return "cancel"
+        else:
+            if kw in t: return "cancel"
     for kw in THANKS_KW:
         if kw in t: return "thanks"
     for kw in CATALOG_KW:
@@ -176,8 +184,6 @@ def detect_intent(text):
         if kw in t: return "trust_question"
     for kw in HELP_KW:
         if kw in t: return "help"
-    for kw in GREETING_KW:
-        if kw in t: return "greeting"
     digits = "".join(filter(str.isdigit, t))
     if len(digits) >= 9: return "number_inquiry"
     return "unknown"

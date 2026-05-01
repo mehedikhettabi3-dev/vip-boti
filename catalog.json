@@ -1,0 +1,57 @@
+{
+    "Diamond": [
+        {"number": "07 03 31 33 13", "price": "200 DH", "status": "available", "tier": "Diamond"},
+        {"number": "06 38 38 88 85", "price": "200 DH", "status": "available", "tier": "Diamond"},
+        {"number": "07 17 47 44 47", "price": "200 DH", "status": "available", "tier": "Diamond"},
+        {"number": "06 05 55 51 18", "price": "200 DH", "status": "available", "tier": "Diamond"},
+        {"number": "07 07 23 60 61", "price": "200 DH", "status": "available", "tier": "Diamond"}
+    ],
+    "Gold": [
+        {"number": "06 09 39 01 07", "price": "200 DH", "status": "available", "tier": "Gold"},
+        {"number": "07 06 06 36 79", "price": "100 DH", "status": "available", "tier": "Gold"},
+        {"number": "06 04 03 89 84", "price": "100 DH", "status": "available", "tier": "Gold"},
+        {"number": "07 05 05 76 81", "price": "100 DH", "status": "available", "tier": "Gold"},
+        {"number": "07 03 22 06 00", "price": "100 DH", "status": "available", "tier": "Gold"},
+        {"number": "06 06 09 03 48", "price": "200 DH", "status": "available", "tier": "Gold"},
+        {"number": "06 07 03 13 11", "price": "100 DH", "status": "available", "tier": "Gold"},
+        {"number": "07 24 01 23 01", "price": "100 DH", "status": "available", "tier": "Gold"},
+        {"number": "07 05 11 19 13", "price": "100 DH", "status": "available", "tier": "Gold"},
+        {"number": "07 20 05 07 44", "price": "100 DH", "status": "available", "tier": "Gold"},
+        {"number": "07 05 70 74 08", "price": "100 DH", "status": "available", "tier": "Gold"},
+        {"number": "06 02 44 01 11", "price": "100 DH", "status": "available", "tier": "Gold"},
+        {"number": "06 35 38 28 35", "price": "100 DH", "status": "available", "tier": "Gold"},
+        {"number": "06 99 46 46 49", "price": "100 DH", "status": "available", "tier": "Gold"},
+        {"number": "07 10 14 44 48", "price": "100 DH", "status": "available", "tier": "Gold"},
+        {"number": "07 05 07 06 71", "price": "200 DH", "status": "available", "tier": "Gold"}
+    ],
+    "Inwi": [
+        {"number": "06 99 99 34 38", "price": "200 DH", "status": "available", "tier": "Inwi"},
+        {"number": "07 11 11 67 33", "price": "200 DH", "status": "available", "tier": "Inwi"},
+        {"number": "07 06 88 88 18", "price": "150 DH", "status": "available", "tier": "Inwi"},
+        {"number": "07 06 03 33 03", "price": "150 DH", "status": "available", "tier": "Inwi"},
+        {"number": "06 06 96 06 07", "price": "150 DH", "status": "available", "tier": "Inwi"},
+        {"number": "07 13 33 37 06", "price": "150 DH", "status": "available", "tier": "Inwi"},
+        {"number": "07 25 37 77 70", "price": "150 DH", "status": "available", "tier": "Inwi"},
+        {"number": "07 04 46 66 61", "price": "150 DH", "status": "available", "tier": "Inwi"},
+        {"number": "06 08 78 88 82", "price": "150 DH", "status": "available", "tier": "Inwi"},
+        {"number": "07 22 20 23 10", "price": "150 DH", "status": "available", "tier": "Inwi"},
+        {"number": "07 25 24 22 29", "price": "150 DH", "status": "available", "tier": "Inwi"},
+        {"number": "06 04 05 05 59", "price": "150 DH", "status": "available", "tier": "Inwi"},
+        {"number": "06 09 91 96 27", "price": "100 DH", "status": "available", "tier": "Inwi"},
+        {"number": "07 05 77 97 77", "price": "100 DH", "status": "available", "tier": "Inwi"},
+        {"number": "06 99 22 90 94", "price": "100 DH", "status": "available", "tier": "Inwi"},
+        {"number": "07 00 67 08 07", "price": "100 DH", "status": "available", "tier": "Inwi"},
+        {"number": "07 00 50 04 53", "price": "150 DH", "status": "available", "tier": "Inwi"},
+        {"number": "07 25 02 22 28", "price": "150 DH", "status": "available", "tier": "Inwi"},
+        {"number": "07 03 85 04 03", "price": "150 DH", "status": "available", "tier": "Inwi"},
+        {"number": "06 06 78 09 57", "price": "150 DH", "status": "available", "tier": "Inwi"},
+        {"number": "07 04 05 54 59", "price": "150 DH", "status": "available", "tier": "Inwi"}
+    ],
+    "Silver": [
+        {"number": "06 33 37 42 84", "price": "100 DH", "status": "available", "tier": "Silver"},
+        {"number": "07 03 33 81 35", "price": "100 DH", "status": "available", "tier": "Silver"},
+        {"number": "07 20 43 20 59", "price": "100 DH", "status": "available", "tier": "Silver"},
+        {"number": "07 16 34 94 44", "price": "100 DH", "status": "available", "tier": "Silver"},
+        {"number": "07 25 88 33 03", "price": "100 DH", "status": "available", "tier": "Silver"}
+    ]
+}

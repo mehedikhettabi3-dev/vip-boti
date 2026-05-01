@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  vip-bot:
+    build: .
+    container_name: vip_numbers_bot
+    ports:
+      - "10000:10000"
+    environment:
+      - PORT=10000
+      - PYTHONUNBUFFERED=1
+      - ACCESS_TOKEN=${ACCESS_TOKEN}
+      - PHONE_NUMBER_ID=${PHONE_NUMBER_ID}
+      - VERIFY_TOKEN=${VERIFY_TOKEN:-vip_bot_2026}
+      - ADMIN_PHONE=${ADMIN_PHONE:-212625489153}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - GHL_WEBHOOK_URL=${GHL_WEBHOOK_URL}
+    volumes:
+      - .:/app
+      - /app/__pycache__
+    working_dir: /app
+    command: >
+      sh -c "pip install -r requirements.txt &&
+             python whatsapp_bot.py"
+    restart: unless-stopped
+    networks:
+      - vip-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  vip-network:
+    driver: bridge

@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+log.txt
+log.txt.*
+sessions.json
+known_leads.json
+orders.json
+temp_boti/
+.DS_Store

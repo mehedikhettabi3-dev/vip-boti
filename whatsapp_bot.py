@@ -106,16 +106,40 @@ def get_all_numbers():
     return nums
 
 def find_number_in_catalog(text):
+    """
+    Find a VIP number in catalog from user text.
+    Supports: raw numbers, Arabic queries (رقم، عندك، كاين), and partial matches
+    Returns: (item, tier) or (None, None)
+    """
     catalog = load_json(CATALOG_FILE, {})
+    
+    # Extract ALL digits from text
     digits = "".join(filter(str.isdigit, text))
     if len(digits) < 9: return None, None
+    
+    # Check for exact or partial match in catalog
     for tier, items in catalog.items():
         for item in items:
             if item.get("status", "available") != "available": continue
             item_digits = "".join(filter(str.isdigit, item["number"]))
-            if digits in item_digits or item_digits.endswith(digits[-9:]):
+            # Match full number or last 9 digits
+            if digits in item_digits or item_digits.endswith(digits[-9:]) or digits == item_digits:
                 return item, tier
+    
     return None, None
+
+def is_direct_number_query(text):
+    """
+    Detect if user is directly asking about or mentioning a specific number.
+    Returns True if text contains Arabic/French/English number query keywords.
+    """
+    t = text.lower()
+    # Keywords indicating direct number inquiry: "رقم", "عندك", "كاين", "donne", "envoie", "nomero"
+    direct_keywords = [
+        "رقم", "عندك", "كاين", "ديالكم", "ديالنا",
+        "donne", "envoie", "nomero", "numero", "give", "send", "have"
+    ]
+    return any(kw in t for kw in direct_keywords)
 
 def format_catalog_message():
     catalog = load_json(CATALOG_FILE, {})
@@ -158,9 +182,38 @@ NEGOT_KW    = ["غالي","رخص","naqes","discount","تخفيض","بزاف","c
 DELIVERY_KW = ["توصيل","livraison","delivery","كيوصل","فين يوصل","kifach","tawsil"]
 TRUST_KW    = ["ثقة","واش حقيقي","serious","arnaque","مضمون","sérieux","legit","wa9i3i","bsa7"]
 
+# ============================================================
+# 🎯  CONTACT REQUEST KEYWORDS (Historical Keywords)
+# ============================================================
+# الأفعال والجذور المتعلقة بطلب المعلومات
+CONTACT_VERBS = [
+    "3tini", "3etini", "sift", "sayft", "bghit", "brit", "momkin", "passi", "donne", "khasni", "khassni",
+    "ارسل", "أعطني", "اعطني", "عطيني", "اعطيني", "صيفط", "سيفط", "بغيت", "ممكن", "خاصني", "خصني", "دابا"
+]
+
+# الأسماء والكلمات المتعلقة برقم والتواصل
+CONTACT_NOUNS = [
+    "nmra", "nemra", "nmera", "namra", "num", "numero", "ra9m", "r9m", "tel", "tilifon", "telfon", "wtsp", "whatsapp", "watsap",
+    "نمرة", "النمرة", "نميرة", "رقم", "الرقم", "تيليفون", "تليفون", "هاتف", "واتساب", "وتساب", "التواصل", "الاتصال"
+]
+
 def detect_intent(text):
     t = text.lower().strip()
     words = set(re.split(r'\s+', t))
+    
+    # --- DIRECT NUMBER QUERY FIRST (user asking about/for a specific number) ---
+    digits = "".join(filter(str.isdigit, t))
+    if len(digits) >= 9 and is_direct_number_query(t):
+        return "number_inquiry"
+    
+    # --- CHECK FOR CONTACT REQUEST ---
+    has_verb = any(v in t for v in CONTACT_VERBS)
+    has_noun = any(n in t for n in CONTACT_NOUNS)
+    is_short_msg = len(t.split()) <= 3 and has_noun
+    
+    if (has_verb and has_noun) or is_short_msg:
+        return "contact_request"
+    
     # --- GREETING first (prevents "سلام" → cancel via "لا" substring) ---
     for kw in GREETING_KW:
         if kw in t: return "greeting"
@@ -184,7 +237,7 @@ def detect_intent(text):
         if kw in t: return "trust_question"
     for kw in HELP_KW:
         if kw in t: return "help"
-    digits = "".join(filter(str.isdigit, t))
+    
     if len(digits) >= 9: return "number_inquiry"
     return "unknown"
 
@@ -288,6 +341,19 @@ def handle_logic(sender, text):
     if sender == ADMIN_PHONE and raw_text.startswith("!"):
         return handle_admin_command(sender, raw_text)
 
+    # — IMMEDIATE NUMBER VERIFICATION (before sessions/forms) —
+    # Check if user is asking about a specific number (رقم، عندك، كاين، brit, etc)
+    t_low = raw_text.lower()
+    digits_in_text = "".join(filter(str.isdigit, t_low))
+    if is_direct_number_query(t_low) and len(digits_in_text) >= 9:
+        vip_item, tier = find_number_in_catalog(raw_text)
+        if vip_item:
+            # Number found — show immediate confirmation without starting form flow
+            return pick_response("number_available", number=vip_item["number"], price=vip_item.get("price", "N/A"))
+        else:
+            # Number not found — show direct rejection
+            return pick_response("number_not_found", catalog_url=CATALOG_URL)
+
     # — ORDER FORM FLOW —
     if sender in sessions and "step" in sessions[sender]:
         session = sessions[sender]
@@ -359,6 +425,9 @@ def handle_logic(sender, text):
 
     if intent == "number_inquiry":
         return pick_response("number_not_found")
+
+    if intent == "contact_request":
+        return pick_response("contact_request", catalog_url=CATALOG_URL)
 
     if intent in ("greeting", "price_inquiry", "help", "cancel", "thanks", "negotiation", "delivery_question", "trust_question", "unknown"):
         if intent == "cancel" and sender in sessions:

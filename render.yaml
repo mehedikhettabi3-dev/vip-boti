@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: vip-boti
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn whatsapp_bot:app -w 2 --timeout 60 --bind 0.0.0.0:$PORT
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: PYTHON_VERSION
+        value: 3.11

@@ -186,7 +186,7 @@ def mark_number_sold(number_str):
 # 🧠  INTENT DETECTION
 # ============================================================
 GREETING_KW = ["سلام","السلام","مرحبا","أهلا","hi","hello","bonjour","سلا","اهلا","ahlan","mrhba","hola","salam","slm","cv","labas","bsh","yo","salut","hey"]
-CATALOG_KW  = ["الكتالوج","أرقام","ارقام","كتالوج","liste","عرض","نوامر","nwamer","catalog","les numeros","كلهم","catalogue","ارقامكم","arqam","nemra","نمرة","nmra","brit nemra","بغيت نمرة","les numéros","bghit nemra","bghit nwamer","warini"]
+CATALOG_KW  = ["الكتالوج","أرقام","ارقام","كتالوج","liste","عرض","نوامر","nwamer","catalog","كلهم","catalogue","ارقامكم","arqam","bghit nwamer","warini"]
 PRICE_KW    = ["الثمن","ثمن","بشحال","prix","price","كم","غالي","رخيص","سعر","combien","bch7al","thaman","ch7al","شحال"]
 HELP_KW     = ["مساعدة","help","aide","كيفاش","comment","شنو","wayfash","كيف","chno","wach","how"]
 CANCEL_KW   = ["لا","cancel","إلغاء","!reset","/reset","stop","خلاص","مابغيتش","annuler"]

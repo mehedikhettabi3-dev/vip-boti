@@ -143,14 +143,27 @@ def is_direct_number_query(text):
 
 def format_catalog_message():
     catalog = load_json(CATALOG_FILE, {})
+    
+    # إذا كان الكتالوج فارغ — رد تنبيه
+    if not catalog:
+        return "⚠️ الكتالوج فارغ دابا — أضف نوامر دابا باش تشوفهم هنا! 📋"
+    
     lines = ["🌟 *أرقام VIP المتوفرة حالياً:* \n"]
+    has_available = False
+    
     for tier, items in catalog.items():
         available = [i for i in items if i.get("status", "available") == "available"]
         if not available: continue
+        has_available = True
         lines.append(f"🔹 *{tier.upper()}:*")
         for item in available:
             lines.append(f"   📱 {item['number']} — *{item.get('price', 'N/A')}*")
         lines.append("")
+    
+    # إذا ما كاينش نوامر متوفرين
+    if not has_available:
+        return "😕 ما كاينش نوامر متوفرين دابا — خاصك تتصل بينا مباشرة! 📞"
+    
     lines.append(f"🌐 شوف الكتالوج كامل هنا: {CATALOG_URL}")
     lines.append("\nصيفط ليا الرقم اللي عجبك باش نكملو! 🚀")
     return "\n".join(lines)
@@ -201,12 +214,16 @@ def detect_intent(text):
     t = text.lower().strip()
     words = set(re.split(r'\s+', t))
     
-    # --- DIRECT NUMBER QUERY FIRST (user asking about/for a specific number) ---
+    # --- PRIORITY 1: CATALOG (most important — prevents greeting override) ---
+    for kw in CATALOG_KW:
+        if kw in t: return "show_catalog"
+    
+    # --- PRIORITY 2: DIRECT NUMBER QUERY ---
     digits = "".join(filter(str.isdigit, t))
     if len(digits) >= 9 and is_direct_number_query(t):
         return "number_inquiry"
     
-    # --- CHECK FOR CONTACT REQUEST ---
+    # --- PRIORITY 3: CHECK FOR CONTACT REQUEST ---
     has_verb = any(v in t for v in CONTACT_VERBS)
     has_noun = any(n in t for n in CONTACT_NOUNS)
     is_short_msg = len(t.split()) <= 3 and has_noun
@@ -214,19 +231,20 @@ def detect_intent(text):
     if (has_verb and has_noun) or is_short_msg:
         return "contact_request"
     
-    # --- GREETING first (prevents "سلام" → cancel via "لا" substring) ---
+    # --- PRIORITY 4: GREETING (after catalog) ---
     for kw in GREETING_KW:
         if kw in t: return "greeting"
-    # --- CANCEL: exact-word match for short words like "لا" ---
+    
+    # --- PRIORITY 5: CANCEL: exact-word match for short words like "لا" ---
     for kw in CANCEL_KW:
         if len(kw) <= 2:
             if kw in words: return "cancel"
         else:
             if kw in t: return "cancel"
+    
+    # --- PRIORITY 6: OTHER INTENTS ---
     for kw in THANKS_KW:
         if kw in t: return "thanks"
-    for kw in CATALOG_KW:
-        if kw in t: return "show_catalog"
     for kw in PRICE_KW:
         if kw in t: return "price_inquiry"
     for kw in NEGOT_KW:

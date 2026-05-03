@@ -1,7 +1,7 @@
 import os, sys, json, logging, random, re, requests, threading, functools
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
-from flask import Flask, request, jsonify, send_file, Response
+from flask import Flask, request, jsonify, send_file, Response, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -41,7 +41,7 @@ _rh = RotatingFileHandler(_log_path, maxBytes=2*1024*1024, backupCount=3, encodi
 _rh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", handlers=[_rh, logging.StreamHandler()])
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='dist', static_url_path='')
 CORS(app)
 
 # ============================================================
@@ -460,8 +460,8 @@ def handle_logic(sender, text):
 # ============================================================
 @app.route("/", methods=["GET"])
 def home():
-    try: return send_file(os.path.join(BASE_DIR, "index.html"))
-    except: return "<h2>✅ VIP Numbers Bot — Running</h2>", 200
+    try: return send_from_directory('dist', 'index.html')
+    except: return "<h2>✅ VIP Numbers Bot — React App Running</h2>", 200
 
 @app.route("/health")
 def health():
@@ -566,6 +566,19 @@ def api_catalog_manage():
         return jsonify({"error": "unknown action"}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# --- Catch-all route for React client-side routing ---
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def catch_all(path):
+    """Serve React app for all routes that don't match API or static files"""
+    # Don't catch API routes, webhooks, or dashboard
+    if path.startswith('api/') or path.startswith('webhook') or path.startswith('dashboard') or path.startswith('static/'):
+        return jsonify({"error": "Not found"}), 404
+    try:
+        return send_from_directory('dist', 'index.html')
+    except:
+        return "<h2>✅ VIP Numbers Bot — React App Running</h2>", 200
 
 # --- Keep-alive ---
 def keep_alive():

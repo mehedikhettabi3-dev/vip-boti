@@ -1,270 +1,616 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VIP NUMBERS | Premium Catalog</title>
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;500;700&family=Syncopate:wght@400;700&display=swap" rel="stylesheet">
+    <title>Inwi VIP Number - أرقام VIP موجودة الآن</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
     <style>
-        :root {
-            --bg: #05050f;
-            --surface: #0c0c1e;
-            --primary: #00f2ff;
-            --primary-dim: rgba(0, 242, 255, 0.1);
-            --text: #ffffff;
-            --text-muted: #8b8b9d;
-            --border: rgba(255, 255, 255, 0.05);
-            --card-bg: linear-gradient(145deg, #0f0f2d, #08081a);
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
         body {
-            background-color: var(--bg);
-            color: var(--text);
-            font-family: 'Space Grotesk', sans-serif;
+            background: linear-gradient(135deg, #0f0f23 0%, #1a0033 50%, #0f0f23 100%);
+            min-height: 100vh;
             overflow-x: hidden;
-            background-image: radial-gradient(circle at 10% 10%, #1a1a40 0%, transparent 40%), radial-gradient(circle at 90% 90%, #001a1a 0%, transparent 40%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
-        nav { padding: 30px 5%; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); backdrop-filter: blur(10px); position: sticky; top: 0; z-index: 100; }
-        .logo { font-family: 'Syncopate', sans-serif; font-weight: 700; font-size: 20px; letter-spacing: 5px; }
-        .nav-links { display: flex; gap: 30px; }
-        .nav-links a { color: var(--text-muted); text-decoration: none; font-size: 13px; text-transform: uppercase; letter-spacing: 2px; transition: 0.3s; }
-        .nav-links a:hover { color: var(--primary); }
-        .btn-contact { background: var(--primary); color: #000; padding: 10px 25px; border-radius: 4px; font-weight: 700; text-decoration: none; font-size: 12px; }
-        .hero { padding: 80px 5% 40px; text-align: center; }
-        .hero h1 { font-family: 'Syncopate', sans-serif; font-size: clamp(30px, 5vw, 60px); margin-bottom: 10px; letter-spacing: -2px; }
-        .hero p { color: var(--text-muted); font-size: 16px; letter-spacing: 1px; }
-        .filters { display: flex; justify-content: center; gap: 15px; margin: 40px 0; flex-wrap: wrap; }
-        .filter-btn { background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); padding: 12px 24px; border-radius: 8px; cursor: pointer; transition: 0.3s; font-weight: 600; }
-        .filter-btn.active { background: var(--primary-dim); border-color: var(--primary); color: var(--primary); }
-        .container { max-width: 1300px; margin: 0 auto; padding: 0 5% 120px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 25px; }
-        .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 16px; padding: 30px; position: relative; transition: 0.4s; overflow: hidden; }
-        .card:hover { border-color: var(--primary); box-shadow: 0 0 30px rgba(0,242,255,0.1); transform: translateY(-5px); }
-        .card-tier { position: absolute; top: 20px; left: 20px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; color: var(--primary); display: flex; align-items: center; gap: 5px; }
-        .card-tier::before { content: ''; width: 6px; height: 6px; background: var(--primary); border-radius: 50%; display: inline-block; }
-        .card-number { font-size: 30px; font-weight: 700; margin: 40px 0 20px; text-align: center; letter-spacing: 2px; }
-        .background-footer { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); padding-top: 20px; }
-        .price { font-size: 20px; font-weight: 700; color: #fff; }
-        .btn-buy { background: var(--primary); color: #000; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 700; cursor: pointer; transition: 0.3s; }
-        .btn-buy:hover { filter: brightness(1.2); box-shadow: 0 0 20px var(--primary); }
-        .marquee-container { position: fixed; bottom: 0; width: 100%; background: #000; border-top: 1px solid var(--primary); padding: 12px 0; z-index: 999; }
-        .marquee-content { display: flex; gap: 50px; animation: scroll 30s linear infinite; white-space: nowrap; }
-        .marquee-item { color: var(--primary); font-weight: 700; text-transform: uppercase; font-size: 13px; letter-spacing: 2px; }
-        @keyframes scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-        #bf { position: fixed; bottom: 60px; right: 25px; width: 58px; height: 58px; background: var(--primary); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 1001; box-shadow: 0 0 25px var(--primary); animation: pulse 2s infinite; }
-        @keyframes pulse { 0%,100%{box-shadow:0 0 20px var(--primary);} 50%{box-shadow:0 0 40px var(--primary),0 0 60px rgba(0,242,255,0.3);} }
-        #bc { position: fixed; bottom: 130px; right: 25px; width: 370px; height: 540px; background: var(--surface); border: 1px solid var(--border); border-radius: 20px; display: none; flex-direction: column; z-index: 1002; box-shadow: 0 20px 50px rgba(0,0,0,0.6); overflow: hidden; }
-        #bc.on { display: flex; }
-        .chat-header { padding: 18px 20px; background: linear-gradient(135deg, var(--primary), #0088aa); color: #000; font-weight: 700; display: flex; justify-content: space-between; align-items: center; }
-        .chat-status { font-size: 11px; font-weight: 400; opacity: 0.8; }
-        .chat-messages { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
-        .msg { padding: 10px 14px; border-radius: 12px; font-size: 14px; max-width: 82%; line-height: 1.4; }
-        .msg.u { align-self: flex-end; background: var(--primary); color: #000; border-radius: 12px 12px 4px 12px; }
-        .msg.b { align-self: flex-start; background: #1a1a3a; border: 1px solid rgba(255,255,255,0.05); border-radius: 12px 12px 12px 4px; }
-        .chat-input { padding: 15px; display: flex; gap: 8px; border-top: 1px solid var(--border); }
-        input#bt { flex: 1; background: #161625; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; color: #fff; font-size: 14px; outline: none; }
-        input#bt:focus { border-color: var(--primary); }
-        #lead-overlay { position: absolute; inset: 0; background: var(--surface); z-index: 10; display: none; flex-direction: column; padding: 25px; justify-content: center; gap: 12px; }
-        #lead-overlay.on { display: flex; }
-        #lead-overlay h3 { color: var(--primary); margin-bottom: 8px; font-size: 18px; }
-        #lead-overlay input { padding: 12px 15px; background: #161625; border: 1px solid var(--border); color: #fff; border-radius: 8px; font-size: 14px; outline: none; }
-        #lead-overlay input:focus { border-color: var(--primary); }
-        #lead-overlay button { padding: 14px; background: var(--primary); border: none; font-weight: 700; cursor: pointer; border-radius: 8px; font-size: 15px; color: #000; transition: 0.3s; }
-        #lead-overlay button:hover { filter: brightness(1.15); }
-        @media (max-width: 768px) { #bc { width: 92%; right: 4%; bottom: 120px; } }
+
+        /* Animated Background */
+        .bg-animation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            opacity: 0.3;
+            pointer-events: none;
+        }
+
+        .floating-shape {
+            position: absolute;
+            opacity: 0.1;
+            animation: float 6s ease-in-out infinite;
+        }
+
+        .phone-shape {
+            width: 60px;
+            height: 120px;
+            border: 2px solid rgba(168, 85, 247, 0.3);
+            border-radius: 8px;
+        }
+
+        .sim-shape {
+            width: 40px;
+            height: 60px;
+            border: 2px solid rgba(217, 70, 239, 0.3);
+            border-radius: 4px;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            50% { transform: translateY(-30px) rotate(5deg); }
+        }
+
+        .grid-bg {
+            background-image: 
+                linear-gradient(rgba(168, 85, 247, 0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(168, 85, 247, 0.1) 1px, transparent 1px);
+            background-size: 50px 50px;
+        }
+
+        /* Robot Face */
+        .robot-face {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 50;
+            width: 100px;
+            height: 100px;
+            background: linear-gradient(135deg, #6d28d9 0%, #9333ea 100%);
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(168, 85, 247, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: transform 0.3s;
+        }
+
+        .robot-face:hover {
+            transform: scale(1.1);
+        }
+
+        .robot-eyes {
+            display: flex;
+            gap: 20px;
+            width: 100%;
+            height: 100%;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .eye {
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .pupil {
+            width: 10px;
+            height: 10px;
+            background: #1a0033;
+            border-radius: 50%;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        /* Sales Popup */
+        .sales-popup {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(168, 85, 247, 0.95);
+            backdrop-filter: blur(10px);
+            border: 2px solid rgba(217, 70, 239, 0.5);
+            border-radius: 20px;
+            padding: 30px;
+            text-align: center;
+            z-index: 100;
+            animation: popIn 0.5s cubic-bezier(0.36, 0, 0.66, 1);
+            color: white;
+        }
+
+        @keyframes popIn {
+            0% {
+                opacity: 0;
+                transform: translate(-50%, -50%) scale(0.5);
+            }
+            100% {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1);
+            }
+        }
+
+        .close-popup {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            cursor: pointer;
+            font-size: 24px;
+            color: white;
+        }
+
+        /* Content */
+        .content {
+            position: relative;
+            z-index: 10;
+        }
+
+        .hero {
+            text-align: center;
+            padding: 40px 20px;
+            color: white;
+        }
+
+        .hero h1 {
+            font-size: 3.5rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #a855f7 0%, #d946ef 50%, #fbbf24 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 10px;
+            animation: slideDown 0.8s ease-out;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .hero-number {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #fbbf24;
+            margin: 20px 0;
+            letter-spacing: 2px;
+        }
+
+        .hero-cta {
+            background: linear-gradient(135deg, #d946ef 0%, #a855f7 100%);
+            color: white;
+            padding: 15px 40px;
+            border-radius: 50px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            transition: transform 0.3s, box-shadow 0.3s;
+            margin: 20px 10px;
+            display: inline-block;
+        }
+
+        .hero-cta:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px rgba(217, 70, 239, 0.4);
+        }
+
+        /* Catalog */
+        .catalog {
+            max-width: 1200px;
+            margin: 60px auto;
+            padding: 40px 20px;
+        }
+
+        .catalog h2 {
+            text-align: center;
+            font-size: 2.5rem;
+            color: white;
+            margin-bottom: 40px;
+            font-weight: 700;
+        }
+
+        .tier {
+            margin-bottom: 50px;
+        }
+
+        .tier h3 {
+            font-size: 1.8rem;
+            color: #fbbf24;
+            margin-bottom: 20px;
+            padding: 10px 0;
+            border-bottom: 2px solid #d946ef;
+        }
+
+        .tier.diamond h3 { color: #60a5fa; }
+        .tier.gold h3 { color: #fbbf24; }
+        .tier.inwi h3 { color: #34d399; }
+        .tier.silver h3 { color: #cbd5e1; }
+
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: rgba(30, 27, 75, 0.8);
+            backdrop-filter: blur(10px);
+            border: 2px solid rgba(168, 85, 247, 0.3);
+            border-radius: 15px;
+            padding: 25px;
+            text-align: center;
+            color: white;
+            transition: all 0.3s;
+            animation: cardSlide 0.5s ease-out forwards;
+            opacity: 0;
+        }
+
+        .card:nth-child(1) { animation-delay: 0.1s; }
+        .card:nth-child(2) { animation-delay: 0.2s; }
+        .card:nth-child(3) { animation-delay: 0.3s; }
+        .card:nth-child(4) { animation-delay: 0.4s; }
+        .card:nth-child(n+5) { animation-delay: 0.5s; }
+
+        @keyframes cardSlide {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .card:hover {
+            transform: translateY(-8px);
+            background: rgba(30, 27, 75, 0.95);
+            border-color: #d946ef;
+            box-shadow: 0 15px 40px rgba(217, 70, 239, 0.3);
+        }
+
+        .card-number {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #fbbf24;
+            margin-bottom: 10px;
+            letter-spacing: 1px;
+        }
+
+        .card-tier {
+            font-size: 0.9rem;
+            color: #a78bfa;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .card-price {
+            font-size: 1.5rem;
+            color: #34d399;
+            font-weight: 700;
+            margin: 15px 0;
+        }
+
+        .whatsapp-btn {
+            background: #25d366;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 50px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            width: 100%;
+            margin-top: 15px;
+        }
+
+        .whatsapp-btn:hover {
+            background: #20ba5a;
+            transform: scale(1.05);
+        }
+
+        /* Loading */
+        .loading {
+            text-align: center;
+            color: #a78bfa;
+            padding: 30px;
+            font-size: 1.1rem;
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 30px 20px;
+            color: #a78bfa;
+            font-size: 0.9rem;
+        }
+
+        footer a {
+            color: #d946ef;
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 2rem;
+            }
+            .hero-number {
+                font-size: 1.8rem;
+            }
+            .cards-grid {
+                grid-template-columns: 1fr;
+            }
+            .robot-face {
+                width: 80px;
+                height: 80px;
+            }
+        }
     </style>
 </head>
 <body>
-
-<nav>
-    <div class="logo">VIP NUMBERS</div>
-    <div class="nav-links">
-        <a href="#">Catalogue</a>
-        <a href="#">Contact</a>
+    <!-- Background -->
+    <div class="bg-animation grid-bg"></div>
+    <div class="bg-animation">
+        <div class="floating-shape phone-shape" style="top: 10%; left: 5%;"></div>
+        <div class="floating-shape sim-shape" style="top: 30%; right: 10%;"></div>
+        <div class="floating-shape phone-shape" style="top: 60%; left: 15%;"></div>
+        <div class="floating-shape sim-shape" style="bottom: 20%; right: 5%;"></div>
     </div>
-    <a href="https://wa.me/212638388885" class="btn-contact">WHATSAPP</a>
-</nav>
 
-<section class="hero">
-    <h1>ARAQAM VIP DISPONIBLES</h1>
-    <p>Choisissez votre numéro et réservez-le en un clic. 41 numéros exclusifs disponibles.</p>
-</section>
-
-<div class="container">
-    <div class="filters">
-        <button class="filter-btn active" onclick="filterCatalog('ALL')">TOUS (41)</button>
-        <button class="filter-btn" onclick="filterCatalog('DIAMOND')">💎 DIAMOND 150 DH (19)</button>
-        <button class="filter-btn" onclick="filterCatalog('PLATINUM')">🥑 PLATINUM 100 DH (22)</button>
-    </div>
-    <div class="grid" id="ngrid"></div>
-</div>
-
-<div class="marquee-container">
-    <div class="marquee-content">
-        <span class="marquee-item">🔥 SERVICE PRESTIGE 24/7</span>
-        <span class="marquee-item">⚡ LIVRAISON RAPIDE DANS TOUT LE MAROC</span>
-        <span class="marquee-item">💎 NUMÉROS EXCLUSIFS ET RARES</span>
-        <span class="marquee-item">🔥 OFFRE LIMITÉE SUR LES PACKS DIAMOND</span>
-        <span class="marquee-item">📳 WHATSAPP: +212 638 388 885</span>
-        <span class="marquee-item">🔥 SERVICE PRESTIGE 24/7</span>
-        <span class="marquee-item">⚡ LIVRAISON RAPIDE DANS TOUT LE MAROC</span>
-        <span class="marquee-item">💎 NUMÉROS EXCLUSIFS ET RARES</span>
-        <span class="marquee-item">🔥 OFFRE LIMITÉE SUR LES PACKS DIAMOND</span>
-        <span class="marquee-item">📳 WHATSAPP: +212 638 388 885</span>
-    </div>
-</div>
-
-<!-- CHATBOT BUTTON -->
-<div id="bf" onclick="toggleBot()">
-    <svg width="26" height="26" viewBox="0 0 24 24" fill="black"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
-</div>
-
-<!-- CHATBOT PANEL -->
-<div id="bc">
-    <div class="chat-header">
-        <div>
-            <div>VIP CONCIERGE 🔥</div>
-            <div class="chat-status">● En ligne - Répond instantanément</div>
-        </div>
-        <span onclick="toggleBot()" style="cursor:pointer;font-size:20px;">✕</span>
-    </div>
-    <div class="chat-messages" id="bm">
-        <div class="msg b">السلام عليكم! 👋 أنا المجتشاري التجاري ديال VIP Numbers. أي رقم استعجبك من الكتالوغ 💎</div>
-    </div>
-    <div id="lead-overlay">
-        <h3>Finaliser la commande 📩</h3>
-        <p style="color:var(--text-muted);font-size:13px;margin-bottom:5px;">Numéro sélectionné: <strong id="sel-num" style="color:var(--primary)"></strong></p>
-        <input type="text" id="ln" placeholder="Nom Complet">
-        <input type="text" id="lv" placeholder="Ville">
-        <input type="tel" id="lt" placeholder="Téléphone WhatsApp">
-        <button onclick="finishLead()">RÉSERVER MAINTENANT ✓</button>
-    </div>
-    <div class="chat-input">
-        <input type="text" id="bt" placeholder="Tapez votre message..." onkeypress="if(event.key==='Enter')sendMsg()">
-        <button onclick="sendMsg()" style="background:var(--primary);border:none;padding:10px 14px;border-radius:8px;cursor:pointer;font-size:18px;">➤</button>
-    </div>
-</div>
-
-<script>
-    let catalog = [];
-    const WA_NUMBER = "212638388885";
-    const tierEmoji = {diamond:"💎", platinum:"🥇", gold:"🥉", inwi:"📶"};
-    // ✅ Unique session ID per browser tab so AI remembers the conversation
-    const SESSION_ID = "web_" + Math.random().toString(36).substr(2, 9);
-
-    async function loadCatalog() {
-        try {
-            const res = await fetch('/api/full_catalog');
-            const data = await res.json();
-            catalog = [];
-            for (const [tier, items] of Object.entries(data)) {
-                for (const item of items) {
-                    if (item.status === 'available') {
-                        catalog.push({number: item.number, price: item.price, tier: tier});
-                    }
-                }
-            }
-            updateFilters();
-            renderGrid(catalog);
-        } catch(e) {
-            console.error('Failed to load catalog:', e);
-            document.getElementById('ngrid').innerHTML = '<p style="color:var(--text-muted);text-align:center;grid-column:1/-1;">جاري تحميل الكتالوج...</p>';
-        }
-    }
-
-    function updateFilters() {
-        const tierCounts = {};
-        catalog.forEach(n => {
-            const t = n.tier.toUpperCase();
-            tierCounts[t] = (tierCounts[t] || 0) + 1;
-        });
-        const filtersDiv = document.querySelector('.filters');
-        let html = `<button class="filter-btn active" onclick="filterCatalog('ALL')">TOUS (${catalog.length})</button>`;
-        for (const [tier, count] of Object.entries(tierCounts)) {
-            const emoji = tierEmoji[tier.toLowerCase()] || "📱";
-            html += `<button class="filter-btn" onclick="filterCatalog('${tier}')">${emoji} ${tier} (${count})</button>`;
-        }
-        filtersDiv.innerHTML = html;
-    }
-
-    function renderGrid(data) {
-        document.getElementById('ngrid').innerHTML = data.map(n => `
-            <div class="card">
-                <div class="card-tier">${tierEmoji[n.tier.toLowerCase()] || "📱"} ${n.tier.toUpperCase()}</div>
-                <div class="card-number">${n.number}</div>
-                <div class="background-footer">
-                    <div class="price">${n.price}</div>
-                    <a href="https://wa.me/${WA_NUMBER}?text=${encodeURIComponent('Salam, bghit nshri had raqm VIP: ' + n.number + ' (' + n.tier + ') - ' + n.price)}" target="_blank" class="btn-buy">RÉSERVER</a>
-                </div>
+    <!-- Robot Face -->
+    <div class="robot-face">
+        <div class="robot-eyes">
+            <div class="eye">
+                <div class="pupil"></div>
             </div>
-        `).join('');
-        if (data.length === 0) {
-            document.getElementById('ngrid').innerHTML = '<p style="color:var(--text-muted);text-align:center;grid-column:1/-1;">لا توجد أرقام في هذا الصنف حالياً</p>';
-        }
-    }
+            <div class="eye">
+                <div class="pupil"></div>
+            </div>
+        </div>
+    </div>
 
-    function filterCatalog(tier) {
-        document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
-        event.target.classList.add('active');
-        if (tier === 'ALL') {
-            renderGrid(catalog);
-        } else {
-            renderGrid(catalog.filter(n => n.tier.toUpperCase() === tier));
-        }
-    }
+    <!-- Content -->
+    <div class="content">
+        <!-- Hero -->
+        <section class="hero">
+            <h1>Inwi VIP Number 👑</h1>
+            <p style="font-size: 1.2rem; margin-bottom: 20px; color: #a78bfa;">أرقام VIP موجودة الآن</p>
+            <div class="hero-number">07 03 31 33 13</div>
+            <p style="color: #fbbf24; margin-bottom: 25px; font-size: 1.1rem;">200 DH</p>
+            <button class="hero-cta" onclick="orderHero()">أطلب عبر واتساب 📱</button>
+        </section>
 
-    function toggleBot() {
-        document.getElementById('bc').classList.toggle('on');
-    }
+        <!-- Catalog -->
+        <section class="catalog">
+            <h2>كاتالوج أرقامنا</h2>
+            <div id="catalog-container"></div>
+        </section>
 
-    // ✅ FIX: Real AI chatbot — calls /api/chat backend
-    function addMsg(text, role) {
-        const chat = document.getElementById('bm');
-        const div = document.createElement('div');
-        div.className = 'msg ' + role;
-        div.textContent = text;
-        chat.appendChild(div);
-        chat.scrollTop = chat.scrollHeight;
-        return div;
-    }
+        <!-- Footer -->
+        <footer>
+            <p>🚀 أرقام VIP بأرخص الأسعار | جودة مضمونة</p>
+            <p>📞 تواصل معنا عبر واتساب للطلبات والاستفسارات</p>
+        </footer>
+    </div>
 
-    async function sendMsg() {
-        const input = document.getElementById('bt');
-        const msg = input.value.trim();
-        if (!msg) return;
-        input.value = '';
-        input.disabled = true;
+    <!-- Sales Popup -->
+    <div id="salesPopup" class="sales-popup" style="display: none;">
+        <span class="close-popup" onclick="closePopup()">✕</span>
+        <h3 style="font-size: 1.3rem; margin-bottom: 15px;">عرض سريع! ⚡</h3>
+        <p id="popupName" style="font-size: 1rem; margin-bottom: 10px;"></p>
+        <p id="popupNumber" style="font-size: 1.5rem; font-weight: 700; margin: 15px 0;"></p>
+        <p id="popupPrice" style="font-size: 1.2rem; margin-bottom: 20px;"></p>
+        <button class="hero-cta" onclick="orderFromPopup()" style="width: 100%;">أطلب الآن</button>
+    </div>
 
-        // Show user message
-        addMsg(msg, 'u');
+    <script>
+        // Robot eyes following mouse
+        document.addEventListener('mousemove', (e) => {
+            const pupils = document.querySelectorAll('.pupil');
+            const robotFace = document.querySelector('.robot-face');
+            const rect = robotFace.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
 
-        // Show typing indicator
-        const typingDiv = addMsg('...', 'b');
-        typingDiv.style.opacity = '0.5';
-        typingDiv.style.fontStyle = 'italic';
-
-        try {
-            const res = await fetch('/api/chat', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ prompt: msg, sender: SESSION_ID })
+            const angle = Math.atan2(e.clientY - centerY, e.clientX - centerX);
+            pupils.forEach(pupil => {
+                const x = Math.cos(angle) * 5;
+                const y = Math.sin(angle) * 5;
+                pupil.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
             });
-            const data = await res.json();
-            typingDiv.remove();
-            addMsg(data.response || 'عذراً، حاول مرة أخرى 😊', 'b');
-        } catch(e) {
-            typingDiv.remove();
-            addMsg('مشكل في الاتصال، عاود حاول 🔄', 'b');
-        } finally {
-            input.disabled = false;
-            input.focus();
-        }
-    }
+        });
 
-    // Load catalog on page load
-    loadCatalog();
-    // Refresh every 30 seconds to reflect sold numbers
-    setInterval(loadCatalog, 30000);
-</script>
+        // Backup catalog
+        const backupCatalog = {
+            Diamond: [
+                { number: "07 03 31 33 13", price: "200 DH", tier: "Diamond" },
+                { number: "06 38 38 88 85", price: "200 DH", tier: "Diamond" },
+                { number: "07 17 47 44 47", price: "200 DH", tier: "Diamond" },
+                { number: "06 05 55 51 18", price: "200 DH", tier: "Diamond" },
+                { number: "07 07 23 60 61", price: "200 DH", tier: "Diamond" }
+            ],
+            Gold: [
+                { number: "06 09 39 01 07", price: "200 DH", tier: "Gold" },
+                { number: "07 06 06 36 79", price: "100 DH", tier: "Gold" },
+                { number: "06 04 03 89 84", price: "100 DH", tier: "Gold" },
+                { number: "07 05 05 76 81", price: "100 DH", tier: "Gold" },
+                { number: "07 03 22 06 00", price: "100 DH", tier: "Gold" },
+                { number: "06 06 09 03 48", price: "200 DH", tier: "Gold" },
+                { number: "06 07 03 13 11", price: "100 DH", tier: "Gold" },
+                { number: "07 24 01 23 01", price: "100 DH", tier: "Gold" },
+                { number: "07 05 11 19 13", price: "100 DH", tier: "Gold" },
+                { number: "07 20 05 07 44", price: "100 DH", tier: "Gold" },
+                { number: "07 05 70 74 08", price: "100 DH", tier: "Gold" },
+                { number: "06 02 44 01 11", price: "100 DH", tier: "Gold" },
+                { number: "06 35 38 28 35", price: "100 DH", tier: "Gold" },
+                { number: "06 99 46 46 49", price: "100 DH", tier: "Gold" },
+                { number: "07 10 14 44 48", price: "100 DH", tier: "Gold" },
+                { number: "07 05 07 06 71", price: "200 DH", tier: "Gold" }
+            ],
+            Inwi: [
+                { number: "06 99 99 34 38", price: "200 DH", tier: "Inwi" },
+                { number: "07 11 11 67 33", price: "200 DH", tier: "Inwi" },
+                { number: "07 06 88 88 18", price: "150 DH", tier: "Inwi" },
+                { number: "07 06 03 33 03", price: "150 DH", tier: "Inwi" },
+                { number: "06 06 96 06 07", price: "150 DH", tier: "Inwi" },
+                { number: "07 13 33 37 06", price: "150 DH", tier: "Inwi" },
+                { number: "07 25 37 77 70", price: "150 DH", tier: "Inwi" },
+                { number: "07 04 46 66 61", price: "150 DH", tier: "Inwi" },
+                { number: "06 08 78 88 82", price: "150 DH", tier: "Inwi" },
+                { number: "07 22 20 23 10", price: "150 DH", tier: "Inwi" },
+                { number: "07 25 24 22 29", price: "150 DH", tier: "Inwi" },
+                { number: "06 04 05 05 59", price: "150 DH", tier: "Inwi" },
+                { number: "06 09 91 96 27", price: "100 DH", tier: "Inwi" },
+                { number: "07 05 77 97 77", price: "100 DH", tier: "Inwi" },
+                { number: "06 99 22 90 94", price: "100 DH", tier: "Inwi" },
+                { number: "07 00 67 08 07", price: "100 DH", tier: "Inwi" },
+                { number: "07 00 50 04 53", price: "150 DH", tier: "Inwi" },
+                { number: "07 25 02 22 28", price: "150 DH", tier: "Inwi" },
+                { number: "07 03 85 04 03", price: "150 DH", tier: "Inwi" },
+                { number: "06 06 78 09 57", price: "150 DH", tier: "Inwi" },
+                { number: "07 04 05 54 59", price: "150 DH", tier: "Inwi" }
+            ],
+            Silver: [
+                { number: "06 33 37 42 84", price: "100 DH", tier: "Silver" },
+                { number: "07 03 33 81 35", price: "100 DH", tier: "Silver" },
+                { number: "07 20 43 20 59", price: "100 DH", tier: "Silver" },
+                { number: "07 16 34 94 44", price: "100 DH", tier: "Silver" },
+                { number: "07 25 88 33 03", price: "100 DH", tier: "Silver" }
+            ]
+        };
+
+        let currentCatalog = null;
+        let popupNumber = null;
+
+        // Moroccan names and cities for popup
+        const moroccanNames = ['فاطمة', 'محمد', 'حسن', 'سارة', 'علي', 'خديجة', 'إبراهيم', 'مريم'];
+        const moroccanCities = ['الرباط', 'فاس', 'مراكش', 'الدار البيضاء', 'تطوان', 'أكادير', 'طنجة'];
+
+        // Load catalog
+        async function loadCatalog() {
+            try {
+                const response = await fetch('https://vip-boti.onrender.com/api/full_catalog');
+                const data = await response.json();
+                currentCatalog = data;
+                renderCatalog(data);
+            } catch (error) {
+                console.log('API failed, using backup');
+                currentCatalog = backupCatalog;
+                renderCatalog(backupCatalog);
+            }
+        }
+
+        // Render catalog
+        function renderCatalog(catalog) {
+            const container = document.getElementById('catalog-container');
+            container.innerHTML = '';
+
+            const tiers = ['Diamond', 'Gold', 'Inwi', 'Silver'];
+            const tierClasses = {
+                Diamond: 'diamond',
+                Gold: 'gold',
+                Inwi: 'inwi',
+                Silver: 'silver'
+            };
+
+            tiers.forEach(tier => {
+                if (catalog[tier] && catalog[tier].length > 0) {
+                    const tierDiv = document.createElement('div');
+                    tierDiv.className = `tier ${tierClasses[tier]}`;
+                    tierDiv.innerHTML = `<h3>${tier}</h3>`;
+
+                    const cardsGrid = document.createElement('div');
+                    cardsGrid.className = 'cards-grid';
+
+                    catalog[tier].forEach(item => {
+                        if (item.status === 'available') {
+                            const card = document.createElement('div');
+                            card.className = 'card';
+                            card.innerHTML = `
+                                <div class="card-tier">${item.tier}</div>
+                                <div class="card-number">${item.number}</div>
+                                <div class="card-price">${item.price}</div>
+                                <button class="whatsapp-btn" onclick="orderNumber('${item.number}')">
+                                    📱 اطلب الآن
+                                </button>
+                            `;
+                            cardsGrid.appendChild(card);
+                        }
+                    });
+
+                    tierDiv.appendChild(cardsGrid);
+                    container.appendChild(tierDiv);
+                }
+            });
+        }
+
+        // WhatsApp order
+        function orderNumber(number) {
+            const url = `https://wa.me/212778375026?text=${encodeURIComponent(number)}`;
+            window.open(url, '_blank');
+        }
+
+        function orderHero() {
+            orderNumber('07 03 31 33 13');
+        }
+
+        function orderFromPopup() {
+            orderNumber(popupNumber);
+            closePopup();
+        }
+
+        // Sales popup
+        function showPopup() {
+            const allNumbers = Object.values(currentCatalog || backupCatalog)
+                .flat()
+                .filter(item => item && item.status !== 'sold');
+            
+            if (allNumbers.length === 0) return;
+
+            const randomItem = allNumbers[Math.floor(Math.random() * allNumbers.length)];
+            const randomName = moroccanNames[Math.floor(Math.random() * moroccanNames.length)];
+            const randomCity = moroccanCities[Math.floor(Math.random() * moroccanCities.length)];
+
+            popupNumber = randomItem.number;
+            document.getElementById('popupName').textContent = `${randomName} من ${randomCity}`;
+            document.getElementById('popupNumber').textContent = randomItem.number;
+            document.getElementById('popupPrice').textContent = randomItem.price;
+            
+            document.getElementById('salesPopup').style.display = 'block';
+        }
+
+        function closePopup() {
+            document.getElementById('salesPopup').style.display = 'none';
+        }
+
+        // Init
+        loadCatalog();
+        setInterval(showPopup, 5000);
+    </script>
 </body>
 </html>

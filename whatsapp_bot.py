@@ -1,4 +1,4 @@
-import os, sys, json, logging, random, re, requests, threading, functools
+import os, sys, json, logging, random, re, requests, threading, functools, html
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
 from flask import Flask, request, jsonify, send_file, Response, send_from_directory
@@ -466,7 +466,59 @@ def home():
 @app.route("/health")
 def health():
     avail = len([n for n in get_all_numbers() if n.get('status','available') == 'available'])
-    return jsonify({"status": "ok", "bot": "VIP Numbers Bot", "ai": "disabled (responses.json)", "numbers_available": avail, "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}), 200
+    config_status = "✅" if (ACCESS_TOKEN and PHONE_NUMBER_ID) else "❌"
+    return jsonify({
+        "status": "ok", 
+        "bot": "VIP Numbers Bot", 
+        "ai": "disabled (responses.json)", 
+        "numbers_available": avail, 
+        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "config": config_status,
+        "access_token_set": bool(ACCESS_TOKEN),
+        "phone_number_id": PHONE_NUMBER_ID,
+        "webhook_url": f"{CATALOG_URL}/webhook"
+    }), 200
+
+@app.route("/logs", methods=["GET"])
+@require_auth
+def view_logs():
+    """View recent bot logs (admin only)"""
+    try:
+        lines = request.args.get("lines", 50, type=int)
+        if os.path.exists(_log_path):
+            with open(_log_path, "r", encoding="utf-8") as f:
+                all_lines = f.readlines()
+                recent = all_lines[-lines:] if lines else all_lines
+                return f"<pre>{html.escape(''.join(recent))}</pre>", 200
+        return "<p>No logs found</p>", 200
+    except Exception as e:
+        return f"<p>Error: {e}</p>", 500
+
+@app.route("/test", methods=["POST"])
+def test_webhook():
+    """Test endpoint - simulate WhatsApp message for debugging"""
+    try:
+        data = request.get_json(force=True)
+        test_phone = data.get("phone", "212638388885").replace("+", "")
+        test_message = data.get("message", "سلام").strip()
+        
+        logging.info(f"🧪 [TEST] Simulating message from {test_phone}: {test_message}")
+        
+        # Simulate webhook message
+        reply = handle_logic(test_phone, test_message)
+        
+        # Actually send it via WhatsApp
+        send_status = send_whatsapp(test_phone, reply)
+        
+        return jsonify({
+            "ok": True,
+            "message_sent": send_status,
+            "reply": reply,
+            "test_phone": test_phone
+        }), 200
+    except Exception as e:
+        logging.error(f"[Test Error]: {e}")
+        return jsonify({"error": str(e)}), 500
 
 def require_auth(f):
     @functools.wraps(f)
@@ -486,27 +538,48 @@ def dashboard():
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
-        if request.args.get("hub.verify_token") == VERIFY_TOKEN:
-            return request.args.get("hub.challenge"), 200
-        return "Forbidden", 403
+        token = request.args.get("hub.verify_token")
+        challenge = request.args.get("hub.challenge")
+        logging.info(f"🔐 [WEBHOOK VERIFY] Token: {token[:20]}... | Challenge: {challenge[:20] if challenge else 'None'}...")
+        
+        if token == VERIFY_TOKEN:
+            logging.info("✅ [WEBHOOK] Verification successful!")
+            return challenge, 200
+        else:
+            logging.warning(f"❌ [WEBHOOK] Invalid token! Expected: {VERIFY_TOKEN}, Got: {token}")
+            return "Forbidden", 403
+    
     try:
         data = request.get_json(force=True)
+        logging.info(f"📥 [WEBHOOK RAW] {json.dumps(data)[:500]}...")
+        
         if 'entry' in data and data['entry'][0]['changes'][0]['value'].get('messages'):
             msg = data['entry'][0]['changes'][0]['value']['messages'][0]
             msg_id = msg.get('id', '')
-            if msg_id in processed_messages: return "ok", 200
+            
+            if msg_id in processed_messages:
+                logging.info(f"⏭️  [WEBHOOK] Already processed: {msg_id}")
+                return "ok", 200
+            
             processed_messages.add(msg_id)
-            if len(processed_messages) > 500: processed_messages.clear()
+            if len(processed_messages) > 500: 
+                processed_messages.clear()
+            
             sender = "".join(filter(str.isdigit, msg['from']))
-            logging.info(f"📩 [RECEIVE] From: {sender}")
+            logging.info(f"📩 [RECEIVE] From: {sender} | Message ID: {msg_id}")
+            
             if msg.get('type') == 'text':
                 body = msg['text']['body']
+                logging.info(f"💬 [MESSAGE] Text: {body}")
                 reply = handle_logic(sender, body)
-                send_whatsapp(sender, reply)
+                send_status = send_whatsapp(sender, reply)
+                logging.info(f"📤 [REPLY] Status: {send_status}")
             elif msg.get('type') in ('image','document','audio','video','sticker'):
+                logging.info(f"📎 [MEDIA] Type: {msg.get('type')}")
                 send_whatsapp(sender, pick_response("media_received"))
     except Exception as e:
-        logging.error(f"[Webhook Error]: {e}")
+        logging.error(f"[Webhook Error]: {e}", exc_info=True)
+    
     return "ok", 200
 
 @app.route("/api/register", methods=["POST"])

@@ -509,6 +509,34 @@ def webhook():
         logging.error(f"[Webhook Error]: {e}")
     return "ok", 200
 
+@app.route("/api/register", methods=["POST"])
+def api_register():
+    """Register a phone number to receive bot notifications and updates"""
+    try:
+        data = request.get_json(force=True)
+        phone = "".join(filter(str.isdigit, str(data.get("phone", "")).strip()))
+        name = data.get("name", "").strip()
+        
+        if not phone or len(phone) < 9:
+            return jsonify({"error": "رقم هاتف غير صحيح — صيفط رقم صحيح 📱"}), 400
+        
+        # Save to known leads
+        leads = _get_known_leads()
+        leads.add(phone)
+        save_json(LEADS_FILE, list(leads))
+        
+        # Log registration
+        logging.info(f"✅ [REGISTER] Phone: {phone} | Name: {name}")
+        
+        # Send welcome message
+        msg = f"✨ مرحبا {name or 'سيدي'}! \n\n✅ تم تسجيلك بنجاح!\n\nستتلقى من الآن الجديد من الأرقام المتاحة والعروضات. 🎯\n\nصيفط ليا الرقم اللي بغيت باش نكملو 📞"
+        threading.Thread(target=send_whatsapp, args=(phone, msg)).start()
+        
+        return jsonify({"ok": True, "message": "✅ تم التسجيل بنجاح!", "phone": phone}), 200
+    except Exception as e:
+        logging.error(f"[Register Error]: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
     try:
@@ -565,6 +593,38 @@ def api_catalog_manage():
             return jsonify({"ok": True})
         return jsonify({"error": "unknown action"}), 400
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/broadcast", methods=["POST"])
+@require_auth
+def api_broadcast():
+    """Send a message to all registered users (admin only)"""
+    try:
+        data = request.get_json(force=True)
+        message = data.get("message", "").strip()
+        if not message:
+            return jsonify({"error": "رسالة مطلوبة"}), 400
+        
+        leads = _get_known_leads()
+        sent_count = 0
+        failed = []
+        
+        for phone in leads:
+            if phone != ADMIN_PHONE:  # Don't send to admin twice
+                if send_whatsapp(phone, message):
+                    sent_count += 1
+                else:
+                    failed.append(phone)
+        
+        logging.info(f"📢 [BROADCAST] Sent: {sent_count} | Failed: {len(failed)}")
+        return jsonify({
+            "ok": True, 
+            "sent": sent_count, 
+            "failed": len(failed),
+            "message": f"تم الإرسال إلى {sent_count} مستخدم ✅"
+        }), 200
+    except Exception as e:
+        logging.error(f"[Broadcast Error]: {e}")
         return jsonify({"error": str(e)}), 500
 
 # --- Catch-all route for React client-side routing ---

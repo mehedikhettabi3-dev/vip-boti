@@ -1,17 +1,6 @@
 import { useEffect, useMemo, useState, type PointerEvent } from 'react'
 import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion'
-import {
-  Crown,
-  Diamond,
-  Gem,
-  MessageCircle,
-  Music2,
-  ShieldCheck,
-  Sparkles,
-  Star,
-  Smartphone,
-  Zap,
-} from 'lucide-react'
+import { Copy, Crown, Diamond, Gem, MessageCircle, Music2, Radio, ShieldCheck, Sparkles, Star, Smartphone, Trophy, Zap, Check } from 'lucide-react'
 
 type VipNumber = {
   number: string
@@ -23,16 +12,28 @@ type VipNumber = {
 type Catalog = Record<string, VipNumber[]>
 
 const API_URL = 'https://vip-boti.onrender.com/api/full_catalog'
-const HERO_NUMBER = '07 03 31 33 13'
+const HERO_NUMBER = '07 22 33 33 31'
 const WHATSAPP_BASE = 'https://wa.me/212778375026?text='
 const BRAND_NAME = 'Inwi VIP Number'
 
 const fallbackCatalog: Catalog = {
+  Royal: [
+    { number: '07 22 33 33 31', price: '300 DH', status: 'available', tier: 'Royal' },
+    { number: '07 03 33 34 35', price: '300 DH', status: 'available', tier: 'Royal' },
+    { number: '06 99 09 88 08', price: '300 DH', status: 'available', tier: 'Royal' },
+    { number: '07 40 01 00 94', price: '300 DH', status: 'available', tier: 'Royal' },
+  ],
   Diamond: [
     { number: '07 03 31 33 13', price: '200 DH', status: 'available', tier: 'Diamond' },
     { number: '06 38 38 88 85', price: '200 DH', status: 'available', tier: 'Diamond' },
-    { number: '07 17 47 44 47', price: '200 DH', status: 'available', tier: 'Diamond' },
     { number: '06 05 55 51 18', price: '200 DH', status: 'available', tier: 'Diamond' },
+    { number: '07 12 11 12 28', price: '200 DH', status: 'available', tier: 'Diamond' },
+    { number: '06 87 77 79 50', price: '200 DH', status: 'available', tier: 'Diamond' },
+    { number: '06 29 94 44 41', price: '200 DH', status: 'available', tier: 'Diamond' },
+    { number: '06 29 01 11 13', price: '200 DH', status: 'available', tier: 'Diamond' },
+    { number: '06 30 33 38 18', price: '200 DH', status: 'available', tier: 'Diamond' },
+    { number: '07 07 66 63 69', price: '200 DH', status: 'available', tier: 'Diamond' },
+    { number: '06 80 80 30 47', price: '200 DH', status: 'available', tier: 'Diamond' },
     { number: '07 07 23 60 61', price: '200 DH', status: 'available', tier: 'Diamond' },
   ],
   Gold: [
@@ -56,7 +57,6 @@ const fallbackCatalog: Catalog = {
   Inwi: [
     { number: '06 99 99 34 38', price: '200 DH', status: 'available', tier: 'Inwi' },
     { number: '07 11 11 67 33', price: '200 DH', status: 'available', tier: 'Inwi' },
-    { number: '07 06 88 88 18', price: '150 DH', status: 'available', tier: 'Inwi' },
     { number: '07 06 03 33 03', price: '150 DH', status: 'available', tier: 'Inwi' },
     { number: '06 06 96 06 07', price: '150 DH', status: 'available', tier: 'Inwi' },
     { number: '07 13 33 37 06', price: '150 DH', status: 'available', tier: 'Inwi' },
@@ -65,7 +65,6 @@ const fallbackCatalog: Catalog = {
     { number: '06 08 78 88 82', price: '150 DH', status: 'available', tier: 'Inwi' },
     { number: '07 22 20 23 10', price: '150 DH', status: 'available', tier: 'Inwi' },
     { number: '07 25 24 22 29', price: '150 DH', status: 'available', tier: 'Inwi' },
-    { number: '06 04 05 05 59', price: '150 DH', status: 'available', tier: 'Inwi' },
     { number: '06 09 91 96 27', price: '100 DH', status: 'available', tier: 'Inwi' },
     { number: '07 05 77 97 77', price: '100 DH', status: 'available', tier: 'Inwi' },
     { number: '06 99 22 90 94', price: '100 DH', status: 'available', tier: 'Inwi' },
@@ -98,10 +97,65 @@ const buyers = [
   { name: 'Nabil', city: 'Kenitra' },
 ]
 
-const tierOrder = ['Diamond', 'Gold', 'Inwi', 'Silver']
+const normalizePhone = (number: string) => number.replace(/\D/g, '')
 
-const getWhatsAppUrl = (number: string) => {
-  return `${WHATSAPP_BASE}${encodeURIComponent(number)}`
+const removedNumbers = new Set([
+  '0706888818',
+  '0604050559',
+  '0722232325',
+  '0717474447',
+].map(normalizePhone))
+
+const tierOrder = ['Royal', 'Diamond', 'Gold', 'Inwi', 'Silver']
+const getWhatsAppUrl = (number: string, price?: string, tier?: string) => `${WHATSAPP_BASE}${encodeURIComponent(price && tier ? `Salam, bghit nreservi had nmra VIP: ${number} - ${price} - Tier: ${tier}` : number)}`
+
+const getPatternLabel = (number: string) => {
+  const clean = normalizePhone(number)
+  if (/3333|4444|1111|9999|8888/.test(clean)) return 'Ultra Repeat'
+  if (/777|888|999|333|111|444/.test(clean)) return 'Lucky Triple'
+  if (/00$/.test(clean)) return 'Clean Ending'
+  if (/(\d)\1.*(\d)\2/.test(clean)) return 'Mirror Style'
+  return 'Easy Recall'
+}
+
+const getRarityScore = (item: VipNumber) => {
+  const clean = normalizePhone(item.number)
+  let score = item.price === '300 DH' ? 96 : item.price === '200 DH' ? 88 : item.price === '150 DH' ? 78 : 68
+  if (/3333|4444|1111|9999|8888/.test(clean)) score += 4
+  if (/777|888|999|333|111|444/.test(clean)) score += 3
+  if (/00$/.test(clean)) score += 2
+  return Math.min(score, 99)
+}
+
+const mergeWithProtectedCatalog = (apiCatalog: Catalog): Catalog => {
+  const merged: Catalog = {}
+
+  Object.entries(apiCatalog).forEach(([tier, numbers]) => {
+    const safeNumbers = numbers.filter((item) => !removedNumbers.has(normalizePhone(item.number)))
+    if (safeNumbers.length) merged[tier] = safeNumbers
+  })
+
+  Object.entries(fallbackCatalog).forEach(([tier, numbers]) => {
+    if (!merged[tier]) merged[tier] = []
+
+    numbers.forEach((protectedItem) => {
+      const protectedKey = normalizePhone(protectedItem.number)
+
+      Object.keys(merged).forEach((existingTier) => {
+        merged[existingTier] = merged[existingTier].filter((item) => normalizePhone(item.number) !== protectedKey)
+      })
+
+      if (!removedNumbers.has(protectedKey)) {
+        merged[tier].push(protectedItem)
+      }
+    })
+  })
+
+  return Object.entries(merged).reduce<Catalog>((acc, [tier, numbers]) => {
+    const cleanNumbers = numbers.filter((item) => !removedNumbers.has(normalizePhone(item.number)))
+    if (cleanNumbers.length) acc[tier] = cleanNumbers
+    return acc
+  }, {})
 }
 
 const normalizeCatalog = (data: unknown): Catalog => {
@@ -129,9 +183,12 @@ function App() {
   const [catalog, setCatalog] = useState<Catalog>(fallbackCatalog)
   const [loading, setLoading] = useState(true)
   const [catalogSource, setCatalogSource] = useState<'fallback' | 'live'>('fallback')
-  const [popupSale, setPopupSale] = useState<VipNumber>(fallbackCatalog.Diamond[0])
+  const [popupSale, setPopupSale] = useState<VipNumber>(fallbackCatalog.Royal[0])
   const [popupBuyer, setPopupBuyer] = useState(buyers[0])
   const [popupVisible, setPopupVisible] = useState(false)
+  const [welcomeVisible, setWelcomeVisible] = useState(false)
+  const [copiedNumber, setCopiedNumber] = useState<string | null>(null)
+  const [spotlightIndex, setSpotlightIndex] = useState(0)
 
   const mouseX = useMotionValue(0)
   const mouseY = useMotionValue(0)
@@ -165,6 +222,16 @@ function App() {
   }, [mouseX, mouseY])
 
   useEffect(() => {
+    const showTimer = window.setTimeout(() => setWelcomeVisible(true), 650)
+    const hideTimer = window.setTimeout(() => setWelcomeVisible(false), 3650)
+
+    return () => {
+      window.clearTimeout(showTimer)
+      window.clearTimeout(hideTimer)
+    }
+  }, [])
+
+  useEffect(() => {
     const fetchCatalog = async () => {
       const controller = new AbortController()
       const timeout = window.setTimeout(() => controller.abort(), 6500)
@@ -172,12 +239,10 @@ function App() {
       try {
         const response = await fetch(API_URL, { signal: controller.signal })
         if (!response.ok) throw new Error('Catalog request failed')
-
         const data = await response.json()
         const normalized = normalizeCatalog(data)
-
         if (Object.keys(normalized).length) {
-          setCatalog(normalized)
+          setCatalog(mergeWithProtectedCatalog(normalized))
           setCatalogSource('live')
         }
       } catch (error) {
@@ -195,16 +260,24 @@ function App() {
 
   const allNumbers = useMemo(() => Object.values(catalog).flat(), [catalog])
   const totalNumbers = allNumbers.length
-  const heroItem = allNumbers.find((item) => item.number === HERO_NUMBER) ?? fallbackCatalog.Diamond[0]
+  const heroItem = allNumbers.find((item) => item.number === HERO_NUMBER) ?? fallbackCatalog.Royal[0]
+  const royalNumbers = catalog.Royal ?? fallbackCatalog.Royal
+  const diamondTopNumbers = catalog.Diamond ?? fallbackCatalog.Diamond
+  const spotlightItem = allNumbers[spotlightIndex % Math.max(allNumbers.length, 1)] ?? heroItem
 
   const orderedCatalog = useMemo(() => {
     return Object.entries(catalog).sort(([a], [b]) => {
       const aIndex = tierOrder.indexOf(a)
       const bIndex = tierOrder.indexOf(b)
-
       return (aIndex === -1 ? 99 : aIndex) - (bIndex === -1 ? 99 : bIndex)
     })
   }, [catalog])
+
+  const copyNumber = async (number: string) => {
+    await navigator.clipboard.writeText(number)
+    setCopiedNumber(number)
+    window.setTimeout(() => setCopiedNumber(null), 1300)
+  }
 
   useEffect(() => {
     if (!allNumbers.length) return
@@ -213,7 +286,6 @@ function App() {
       setPopupBuyer(buyers[Math.floor(Math.random() * buyers.length)])
       setPopupSale(allNumbers[Math.floor(Math.random() * allNumbers.length)])
       setPopupVisible(true)
-
       window.setTimeout(() => setPopupVisible(false), 4200)
     }
 
@@ -226,6 +298,14 @@ function App() {
     }
   }, [allNumbers])
 
+  useEffect(() => {
+    const spotlightInterval = window.setInterval(() => {
+      setSpotlightIndex((prev) => prev + 1)
+    }, 1200)
+
+    return () => window.clearInterval(spotlightInterval)
+  }, [])
+
   const scrollToCollection = () => {
     document.getElementById('collections')?.scrollIntoView({ behavior: 'smooth' })
   }
@@ -237,6 +317,15 @@ function App() {
 
   const tierStyle = (tier: string) => {
     const lower = tier.toLowerCase()
+
+    if (lower.includes('royal')) {
+      return {
+        icon: Trophy,
+        accent: 'from-purple-200 via-fuchsia-400 to-amber-300',
+        ring: 'border-purple-200/35',
+        badge: 'bg-gradient-to-r from-purple-300 to-amber-200 text-black',
+      }
+    }
 
     if (lower.includes('diamond')) {
       return {
@@ -276,17 +365,25 @@ function App() {
   const NumberCard = ({ item, tier }: { item: VipNumber; tier: string }) => {
     const style = tierStyle(tier)
     const Icon = style.icon
+    const isSpotlight = item.number === spotlightItem.number
+    const patternLabel = getPatternLabel(item.number)
+    const rarityScore = getRarityScore(item)
+    const isCopied = copiedNumber === item.number
 
     return (
       <motion.article
         initial={false}
         whileHover={{ y: -8, rotateX: 4, rotateY: -3, scale: 1.015 }}
+        animate={isSpotlight ? { scale: 1.02, rotateX: 2, rotateY: -1 } : {}}
         transition={{ type: 'spring', stiffness: 180, damping: 18 }}
-        className={`group relative overflow-hidden rounded-3xl border ${style.ring} bg-gradient-to-br ${style.accent} p-[1px] shadow-2xl shadow-black/40 [transform-style:preserve-3d]`}
+        className={`winged-card group relative overflow-hidden rounded-3xl border ${style.ring} bg-gradient-to-br ${style.accent} p-[1px] shadow-2xl shadow-black/40 [transform-style:preserve-3d] ${isSpotlight ? 'ring-2 ring-amber-400/50 shadow-lg shadow-amber-400/30' : ''}`}
       >
+        <span className="card-wing card-wing-left absolute -left-8 top-1/2 -translate-y-1/2 h-16 w-16 rounded-full opacity-0 blur-md transition-all duration-300 group-hover:opacity-60" style={{ background: `radial-gradient(circle, ${isSpotlight ? '#fbbf24' : '#6366f1'}, transparent)` }} />
+        <span className="card-wing card-wing-right absolute -right-8 top-1/2 -translate-y-1/2 h-16 w-16 rounded-full opacity-0 blur-md transition-all duration-300 group-hover:opacity-60" style={{ background: `radial-gradient(circle, ${isSpotlight ? '#fbbf24' : '#6366f1'}, transparent)` }} />
+
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(255,236,170,0.28),transparent_36%),radial-gradient(circle_at_100%_100%,rgba(124,58,237,0.18),transparent_42%)] opacity-70 transition group-hover:opacity-100" />
 
-        <div className="relative rounded-3xl bg-[#060503]/95 p-4 backdrop-blur-xl sm:p-5">
+        <div className="relative rounded-3xl bg-[#060503]/95 p-4 sm:p-5">
           <div className="flex items-start justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
               <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-200/30 bg-amber-200/10 text-amber-100 shadow-lg shadow-amber-500/10">
@@ -308,14 +405,32 @@ function App() {
             </span>
           </div>
 
-          <a
-            href={getWhatsAppUrl(item.number)}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-amber-200/20 bg-gradient-to-r from-amber-200 via-yellow-500 to-amber-700 px-4 py-3 text-sm font-black uppercase tracking-[0.14em] text-black shadow-[0_14px_40px_rgba(245,158,11,0.18)] transition hover:scale-[1.01] hover:from-amber-100 hover:to-yellow-500"
-          >
-            <MessageCircle size={18} /> Order via WhatsApp
-          </a>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1 rounded-lg bg-black/60 px-2 py-1 text-xs font-semibold text-purple-200">
+              <Radio size={12} /> {patternLabel}
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-lg bg-black/60 px-2 py-1 text-xs font-semibold text-amber-300">
+              ⚡ {rarityScore}%
+            </span>
+          </div>
+
+          <div className="mt-4 flex gap-2">
+            <a
+              href={getWhatsAppUrl(item.number, item.price, tier)}
+              target="_blank"
+              rel="noreferrer"
+              className="flex-1 inline-flex items-center justify-center gap-2 rounded-2xl border border-amber-200/20 bg-gradient-to-r from-amber-200 via-yellow-500 to-amber-700 px-4 py-3 text-sm font-black uppercase tracking-[0.14em] text-black shadow-[0_14px_40px_rgba(245,158,11,0.18)] transition hover:scale-[1.01] hover:from-amber-100 hover:to-yellow-500"
+            >
+              <MessageCircle size={18} /> Order
+            </a>
+
+            <button
+              onClick={() => copyNumber(item.number)}
+              className={`flex items-center justify-center rounded-2xl px-3 py-3 transition ${isCopied ? 'bg-emerald-500/30 border border-emerald-400' : 'bg-black/40 border border-stone-600 hover:border-amber-400/60'}`}
+            >
+              {isCopied ? <Check size={18} className="text-emerald-300" /> : <Copy size={18} className="text-stone-400" />}
+            </button>
+          </div>
         </div>
       </motion.article>
     )
@@ -412,6 +527,39 @@ function App() {
           <div className="mx-auto mt-5 h-2 w-28 rounded-full bg-gradient-to-r from-transparent via-purple-300/90 to-transparent" />
         </motion.div>
       </div>
+
+      {welcomeVisible && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.4, y: 30 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.3, y: 50 }}
+          transition={{ duration: 0.5, type: 'spring', stiffness: 200, damping: 25 }}
+          className="welcome-bot fixed top-1/2 left-1/2 z-40 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-4 rounded-3xl border border-purple-300/40 bg-gradient-to-b from-purple-900/60 via-black/70 to-stone-950/60 p-8 backdrop-blur-xl sm:p-10"
+        >
+          <motion.div
+            animate={{ rotate: [0, 4, -4, 0] }}
+            transition={{ duration: 1.4, repeat: Infinity }}
+            className="text-6xl sm:text-7xl"
+          >
+            🤖
+          </motion.div>
+
+          <div className="text-center">
+            <p className="text-lg font-black text-transparent bg-gradient-to-r from-purple-200 via-fuchsia-400 to-amber-300 bg-clip-text sm:text-xl">
+              مرحبا! Welcome! 👋
+            </p>
+            <p className="mt-2 text-sm text-stone-300 sm:text-base">
+              اختر رقمك الفاخر من أفضل الأرقام الفاخرة
+            </p>
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <span className="inline-flex h-2 w-2 rounded-full bg-purple-400 animate-pulse" />
+            <span className="inline-flex h-2 w-2 rounded-full bg-fuchsia-400 animate-pulse animation-delay-200" />
+            <span className="inline-flex h-2 w-2 rounded-full bg-amber-400 animate-pulse animation-delay-400" />
+          </div>
+        </motion.div>
+      )}
 
       <motion.header
         initial={{ opacity: 0, y: -20 }}
@@ -582,6 +730,54 @@ function App() {
               ? '✅ Live catalog connected. All numbers are loaded from the API.'
               : '🛡️ Backup catalog active. Numbers will not disappear if the API sleeps.'}
         </div>
+
+        {royalNumbers.length > 0 && (
+          <section className="mb-8 rounded-[2rem] border border-purple-200/35 bg-gradient-to-br from-purple-950/40 via-black/60 to-stone-950/40 p-4 shadow-2xl shadow-purple-500/10 sm:p-6">
+            <div className="mb-6 flex items-center justify-between gap-4 rounded-3xl bg-gradient-to-br from-purple-200/15 via-fuchsia-500/8 to-transparent p-5">
+              <div>
+                <div className="flex items-center gap-2 text-amber-100">
+                  <Trophy size={24} />
+                  <span className="text-sm font-bold uppercase tracking-[0.3em]">Royal</span>
+                </div>
+                <h3 className="mt-2 text-3xl font-black text-transparent bg-gradient-to-r from-purple-200 via-fuchsia-400 to-amber-300 bg-clip-text">
+                  🏆 Wajiha / Top Royal
+                </h3>
+              </div>
+              <span className="rounded-full bg-gradient-to-r from-purple-300 to-amber-200 text-black px-4 py-2 text-xs font-black uppercase tracking-[0.2em]">
+                {catalogSource === 'live' ? 'Live' : 'Safe'}
+              </span>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {royalNumbers.map((item) => (
+                <NumberCard key={`Royal-${item.number}`} item={item} tier="Royal" />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {diamondTopNumbers.length > 0 && (
+          <section className="mb-8 rounded-[2rem] border border-amber-200/30 bg-gradient-to-br from-amber-950/30 via-black/60 to-stone-950/30 p-4 shadow-2xl shadow-amber-500/5 sm:p-6">
+            <div className="mb-6 flex items-center justify-between gap-4 rounded-3xl bg-gradient-to-br from-amber-100/12 via-yellow-500/8 to-transparent p-5">
+              <div>
+                <div className="flex items-center gap-2 text-amber-100">
+                  <Diamond size={24} />
+                  <span className="text-sm font-bold uppercase tracking-[0.3em]">Diamond</span>
+                </div>
+                <h3 className="mt-2 text-3xl font-black text-amber-200">
+                  ✨ Next Level
+                </h3>
+              </div>
+              <span className="rounded-full bg-amber-200 text-black px-4 py-2 text-xs font-black uppercase tracking-[0.2em]">
+                200 DH
+              </span>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {diamondTopNumbers.slice(0, 9).map((item) => (
+                <NumberCard key={`Diamond-${item.number}`} item={item} tier="Diamond" />
+              ))}
+            </div>
+          </section>
+        )}
 
         <div className="grid gap-8 lg:grid-cols-2">
           {orderedCatalog.map(([tier, numbers]) => {

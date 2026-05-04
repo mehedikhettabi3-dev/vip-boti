@@ -279,6 +279,86 @@ a {
   }
 }
 
+@keyframes wing-left {
+  0%, 100% {
+    transform: translateX(-24px) scaleX(0.8) rotate(-15deg);
+    opacity: 0;
+  }
+  30%, 70% {
+    opacity: 0.6;
+  }
+  50% {
+    transform: translateX(-12px) scaleX(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+@keyframes wing-right {
+  0%, 100% {
+    transform: translateX(24px) scaleX(-0.8) rotate(15deg);
+    opacity: 0;
+  }
+  30%, 70% {
+    opacity: 0.6;
+  }
+  50% {
+    transform: translateX(12px) scaleX(-1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+@keyframes welcome-bot-wave {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(4deg);
+  }
+  75% {
+    transform: rotate(-4deg);
+  }
+}
+
+.welcome-bot {
+  animation: welcome-bot-wave 1.4s ease-in-out infinite;
+  transform-origin: center bottom;
+}
+
+.winged-card {
+  isolation: isolate;
+}
+
+.card-wing {
+  position: absolute;
+  top: 50%;
+  height: 64px;
+  width: 64px;
+  border-radius: 9999px;
+  opacity: 0;
+  filter: blur(12px);
+  transition: all 0.3s ease;
+}
+
+.card-wing-left {
+  animation: wing-left 3.4s ease-in-out infinite;
+}
+
+.card-wing-right {
+  animation: wing-right 3.4s ease-in-out infinite;
+}
+
+.group:hover .card-wing {
+  opacity: 0.6;
+}
+
+.animation-delay-200 {
+  animation-delay: 0.2s;
+}
+
+.animation-delay-400 {
+  animation-delay: 0.4s;
+}
+
 @media (max-width: 640px) {
   .luxury-3d-bg {
     opacity: 0.7;
@@ -302,6 +382,20 @@ a {
     right: -14px;
     bottom: 28%;
     opacity: 0.2;
+  }
+
+  .card-wing {
+    height: 48px;
+    width: 48px;
+    filter: blur(8px);
+  }
+
+  .group:hover .card-wing {
+    opacity: 0.4;
+  }
+
+  .welcome-bot {
+    max-width: calc(100vw - 2rem);
   }
 }
 

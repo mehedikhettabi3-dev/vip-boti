@@ -627,13 +627,61 @@ def api_broadcast():
         logging.error(f"[Broadcast Error]: {e}")
         return jsonify({"error": str(e)}), 500
 
+# ==========================================
+#  🎨 PASTRY SITE ROUTES
+# ==========================================
+@app.route("/pastry", methods=["GET"])
+@app.route("/pastry-site.html", methods=["GET"])
+@app.route("/site", methods=["GET"])
+@app.route("/design", methods=["GET"])
+def serve_pastry_site():
+    """Serve the luxury pastry website"""
+    try:
+        pastry_path = os.path.join(BASE_DIR, "pastry-site.html")
+        if os.path.exists(pastry_path):
+            with open(pastry_path, "r", encoding="utf-8") as f:
+                return f.read(), 200, {"Content-Type": "text/html; charset=utf-8"}
+        else:
+            return "<h1>🎨 Pastry Site Not Found</h1>", 404
+    except Exception as e:
+        logging.error(f"[Pastry Site Error]: {e}")
+        return f"<h1>Error loading pastry site: {e}</h1>", 500
+
+@app.route("/whatsapp/<phone>", methods=["GET"])
+def whatsapp_redirect(phone):
+    """Direct WhatsApp link endpoint - format: /whatsapp/0638388885 or /whatsapp/212638388885"""
+    clean_phone = "".join(filter(str.isdigit, phone))
+    if len(clean_phone) < 9:
+        return jsonify({"error": "Invalid phone number"}), 400
+    # Ensure it starts with country code
+    if not clean_phone.startswith("212"):
+        clean_phone = "212" + clean_phone.lstrip("0") if clean_phone.startswith("0") else "212" + clean_phone
+    
+    wa_url = f"https://wa.me/{clean_phone}"
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Connecting to WhatsApp...</title>
+        <script>
+            window.location.href = '{wa_url}';
+        </script>
+    </head>
+    <body>
+        <p>Redirecting to WhatsApp...</p>
+        <a href="{wa_url}">Click here if not redirected</a>
+    </body>
+    </html>
+    """, 200, {"Content-Type": "text/html; charset=utf-8"}
+
 # --- Catch-all route for React client-side routing ---
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def catch_all(path):
     """Serve React app for all routes that don't match API or static files"""
-    # Don't catch API routes, webhooks, or dashboard
-    if path.startswith('api/') or path.startswith('webhook') or path.startswith('dashboard') or path.startswith('static/'):
+    # Don't catch API routes, webhooks, dashboard, pastry, or whatsapp redirects
+    if (path.startswith('api/') or path.startswith('webhook') or path.startswith('dashboard') 
+        or path.startswith('static/') or path.startswith('pastry') or path.startswith('whatsapp')):
         return jsonify({"error": "Not found"}), 404
     try:
         return send_from_directory('dist', 'index.html')

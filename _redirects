@@ -1,0 +1,7 @@
+# Redirect rules for Netlify
+/pastry                  /pastry-site.html   200
+/site                    /pastry-site.html   200
+/design                  /pastry-site.html   200
+
+# Fallback to index.html for React app
+/*                       /index.html         200

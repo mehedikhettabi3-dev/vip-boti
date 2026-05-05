@@ -343,6 +343,11 @@ def _save_known_lead(sender):
     save_json(LEADS_FILE, list(leads))
 
 def handle_logic(sender, text):
+    # Block unwanted number
+    BLOCKED = {"212778375026", "0778375026", "778375026"}
+    if any(sender.endswith(b.lstrip('0')) for b in BLOCKED) or sender in BLOCKED:
+        return None  # Silently ignore — no response, no alert
+
     sessions = load_json(SESSIONS_FILE, {})
     raw_text = text.strip()
 

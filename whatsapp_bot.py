@@ -479,6 +479,15 @@ def health():
         "webhook_url": f"{CATALOG_URL}/webhook"
     }), 200
 
+def require_auth(f):
+    @functools.wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or auth.username != DASHBOARD_USER or auth.password != DASHBOARD_PASS:
+            return Response("🔒 Access Denied.", 401, {"WWW-Authenticate": 'Basic realm="VIP Admin"'})
+        return f(*args, **kwargs)
+    return decorated
+
 @app.route("/logs", methods=["GET"])
 @require_auth
 def view_logs():
@@ -519,15 +528,6 @@ def test_webhook():
     except Exception as e:
         logging.error(f"[Test Error]: {e}")
         return jsonify({"error": str(e)}), 500
-
-def require_auth(f):
-    @functools.wraps(f)
-    def decorated(*args, **kwargs):
-        auth = request.authorization
-        if not auth or auth.username != DASHBOARD_USER or auth.password != DASHBOARD_PASS:
-            return Response("🔒 Access Denied.", 401, {"WWW-Authenticate": 'Basic realm="VIP Admin"'})
-        return f(*args, **kwargs)
-    return decorated
 
 @app.route("/dashboard", methods=["GET"])
 @require_auth

@@ -25,8 +25,11 @@ const fallbackCatalog: Catalog = {
     { number: '06 87 77 79 50', price: '200 DH', status: 'available', tier: 'Diamond' },
   ],
   Gold: [
-    { number: '06 09 39 01 07', price: '200 DH', status: 'available', tier: 'Gold' },
-    { number: '07 06 06 36 79', price: '100 DH', status: 'available', tier: 'Gold' },
+    { number: '06 29 01 11 13', price: '150 DH', status: 'available', tier: 'Gold' },
+    { number: '06 29 94 44 41', price: '150 DH', status: 'available', tier: 'Gold' },
+    { number: '06 87 77 79 50', price: '150 DH', status: 'available', tier: 'Gold' },
+    { number: '07 17 58 88 87', price: '150 DH', status: 'available', tier: 'Gold' },
+    { number: '07 24 44 41 97', price: '150 DH', status: 'available', tier: 'Gold' },
   ],
   Inwi: [
     { number: '06 99 99 34 38', price: '200 DH', status: 'available', tier: 'Inwi' },
@@ -68,7 +71,7 @@ const getPatternLabel = (number) => {
 
 const getRarityScore = (item) => {
   const clean = normalizePhone(item.number)
-  let score = item.price === '300 DH' ? 96 : item.price === '200 DH' ? 88 : item.price === '150 DH' ? 78 : 68
+  let score = item.price === '200 DH' ? 88 : item.price === '150 DH' ? 78 : 68
   if (/3333|4444|1111|9999|8888/.test(clean)) score += 4
   if (/777|888|999|333|111|444/.test(clean)) score += 3
   if (/00$/.test(clean)) score += 2

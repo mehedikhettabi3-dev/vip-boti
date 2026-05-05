@@ -13,7 +13,7 @@ type Catalog = Record<string, VipNumber[]>
 
 const API_URL = 'https://vip-boti.onrender.com/api/full_catalog'
 const HERO_NUMBER = '07 03 31 33 13'
-const WHATSAPP_BASE = 'https://wa.me/212778375026?text='
+const WHATSAPP_BASE = 'https://wa.me/212638388885?text='
 const BRAND_NAME = 'Inwi VIP Number'
 
 const fallbackCatalog: Catalog = {

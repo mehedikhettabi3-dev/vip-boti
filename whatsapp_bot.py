@@ -262,7 +262,7 @@ def detect_intent(text):
         if kw in t: return "trust_question"
     for kw in HELP_KW:
         if kw in t: return "help"
-     (with Thread Pool)
+
 # ============================================================
 def send_whatsapp(to, text):
     """Send WhatsApp message with timeout and error handling"""
@@ -287,12 +287,7 @@ def send_whatsapp(to, text):
 
 def send_whatsapp_async(to, text):
     """Send WhatsApp message asynchronously using thread pool"""
-    return whatsapp_executor.submit(send_whatsapp, to, text)code != 200:
-            logging.error(f"❌ [SEND FAIL] {r.text[:500]}")
-        return r.status_code == 200
-    except Exception as e:
-        logging.error(f"❌ [SEND ERROR]: {e}")
-        return False
+    return whatsapp_executor.submit(send_whatsapp, to, text)
 
 # ============================================================
 # 🛠️  ADMIN COMMANDS
@@ -329,7 +324,7 @@ def handle_admin_command(sender, text):
         for t in targets:
             for tier in catalog:
                 before = len(catalog[tier])
-        send_whatsapp_async(ADMIN_PHONE, "🔔 اختبار — الإشعارات خدامة! ✅"endswith(t[-9:])]
+                catalog[tier] = [i for i in catalog[tier] if "".join(filter(str.isdigit, i["number"])) != t and not "".join(filter(str.isdigit, i["number"])).endswith(t[-9:])]
                 if len(catalog[tier]) < before: deleted.append(t)
         if deleted:
             save_json(CATALOG_FILE, catalog)
@@ -360,12 +355,8 @@ def _save_known_lead(sender):
     leads = _get_known_leads()
     leads.add(sender)
     save_json(LEADS_FILE, list(leads))
-        send_whatsapp_async(ADMIN_PHONE, alert)def handle_logic(sender, text):
-    # Block unwanted number
-    BLOCKED = {"212778375026", "0778375026", "778375026"}
-    if any(sender.endswith(b.lstrip('0')) for b in BLOCKED) or sender in BLOCKED:
-        return None  # Silently ignore — no response, no alert
 
+def handle_logic(sender, text):
     sessions = load_json(SESSIONS_FILE, {})
     raw_text = text.strip()
 
@@ -429,7 +420,7 @@ def _save_known_lead(sender):
             sessions[sender] = session
             save_json(SESSIONS_FILE, sessions)
             return pick_response(form_responses[step])
-        else:_async
+        else:
             # ORDER COMPLETE
             vip_num = session["vip_item"]["number"]
             od = session["data"]
@@ -546,18 +537,31 @@ def test_webhook():
             "ok": True,
             "message_sent": send_status,
             "reply": reply,
-            "test_phone": test_phone if token else 'None'}... | Challenge: {challenge[:20] if challenge else 'None'}...")
+            "test_phone": test_phone
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/webhook", methods=["GET", "POST"])
+def webhook():
+    """WhatsApp Cloud API Webhook"""
+    if request.method == "GET":
+        mode = request.args.get("hub.mode")
+        token = request.args.get("hub.verify_token")
+        challenge = request.args.get("hub.challenge")
         
-        if token == VERIFY_TOKEN:
-            logging.info("✅ [WEBHOOK] Verification successful!")
-            return challenge, 200
-        else:
-            logging.warning(f"❌ [WEBHOOK] Invalid token!")
-            return "Forbidden", 403
+        if mode and token:
+            if mode == "subscribe" and token == VERIFY_TOKEN:
+                logging.info("✅ [WEBHOOK] Verification successful!")
+                return challenge, 200
+            else:
+                logging.warning(f"❌ [WEBHOOK] Invalid token!")
+                return "Forbidden", 403
+        return "Webhook is active", 200
     
     try:
         data = request.get_json(force=True)
-        logging.info(f"📥 [WEBHOOK RAW] {json.dumps(data)[:300]}...")
+        logging.info(f"📥 [WEBHOOK RAW] {str(data)[:300]}...")
         
         if 'entry' in data and data['entry'][0]['changes'][0]['value'].get('messages'):
             msg = data['entry'][0]['changes'][0]['value']['messages'][0]
@@ -588,28 +592,14 @@ def test_webhook():
                     send_whatsapp_async(sender, reply)
             elif msg.get('type') in ('image','document','audio','video','sticker'):
                 logging.info(f"📎 [MEDIA] Type: {msg.get('type')}")
-                send_whatsapp_async200
-            
-            processed_messages.add(msg_id)
-            if len(processed_messages) > 500: 
-                processed_messages.clear()
-            
-            sender = "".join(filter(str.isdigit, msg['from']))
-            logging.info(f"📩 [RECEIVE] From: {sender} | Message ID: {msg_id}")
-            
-            if msg.get('type') == 'text':
-                body = msg['text']['body']
-                logging.info(f"💬 [MESSAGE] Text: {body}")
-                reply = handle_logic(sender, body)
-                send_status = send_whatsapp(sender, reply)
-                logging.info(f"📤 [REPLY] Status: {send_status}")
-            elif msg.get('type') in ('image','document','audio','video','sticker'):
-                logging.info(f"📎 [MEDIA] Type: {msg.get('type')}")
-                send_whatsapp(sender, pick_response("media_received"))
+                reply = pick_response("media_received")
+                if reply:
+                    send_whatsapp_async(sender, reply)
+                    
+        return "ok", 200
     except Exception as e:
-        logging.error(f"[Webho asynchronously
-        msg = f"✨ مرحبا {name or 'سيدي'}! \n\n✅ تم تسجيلك بنجاح!\n\nستتلقى من الآن الجديد من الأرقام المتاحة والعروضات. 🎯\n\nصيفط ليا الرقم اللي بغيت باش نكملو 📞"
-        send_whatsapp_async(phone, msg
+        logging.error(f"❌ [WEBHOOK ERROR]: {e}")
+        return "error", 500
 
 @app.route("/api/register", methods=["POST"])
 def api_register():
@@ -690,12 +680,9 @@ def api_catalog_manage():
         elif action == "delete":
             num = data.get("number","").strip()
             for t in catalog:
-                try:
-                    # Use async sending for broadcast
-                    send_whatsapp_async(phone, message)
-                    sent_count += 1
-                except Exception as e:
-                    logging.error(f"Broadcast failed for {phone}: {e}")onify({"ok": True})
+                catalog[t] = [i for i in catalog[t] if i.get("number") != num]
+            save_json(CATALOG_FILE, catalog)
+            return jsonify({"ok": True})
         return jsonify({"error": "unknown action"}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -768,7 +755,24 @@ def whatsapp_redirect(phone):
     <html>
     <head>
         <title>Connecting to WhatsApp...</title>
-        <script>& Maintenance ---
+        <script>window.location.href='{wa_url}';</script>
+    </head>
+    <body>Redirecting...</body>
+    </html>
+    """
+
+@app.route("/<path:path>")
+def catch_all(path):
+    """Serve React app for all routes that don't match API or static files"""
+    if (path.startswith('api/') or path.startswith('webhook') or path.startswith('dashboard') 
+        or path.startswith('static/') or path.startswith('pastry') or path.startswith('whatsapp')):
+        return jsonify({"error": "Not found"}), 404
+    try:
+        return send_from_directory('dist', 'index.html')
+    except:
+        return "<h2>✅ VIP Numbers Bot — React App Running</h2>", 200
+
+# --- Keep-alive & Maintenance ---
 def keep_alive():
     """Periodically ping the server and clean up memory"""
     url = os.environ.get("RENDER_EXTERNAL_URL", "")
@@ -827,29 +831,4 @@ if __name__ == "__main__":
     logging.info("🚀 [START] VIP Numbers Bot started successfully")
     
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, debug=False, threaded=Tru
-def catch_all(path):
-    """Serve React app for all routes that don't match API or static files"""
-    # Don't catch API routes, webhooks, dashboard, pastry, or whatsapp redirects
-    if (path.startswith('api/') or path.startswith('webhook') or path.startswith('dashboard') 
-        or path.startswith('static/') or path.startswith('pastry') or path.startswith('whatsapp')):
-        return jsonify({"error": "Not found"}), 404
-    try:
-        return send_from_directory('dist', 'index.html')
-    except:
-        return "<h2>✅ VIP Numbers Bot — React App Running</h2>", 200
-
-# --- Keep-alive ---
-def keep_alive():
-    import time
-    url = os.environ.get("RENDER_EXTERNAL_URL", "")
-    if url:
-        while True:
-            time.sleep(300)
-            try: requests.get(f"{url}/", timeout=10)
-            except: pass
-
-if __name__ == "__main__":
-    threading.Thread(target=keep_alive, daemon=True).start()
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)

@@ -208,8 +208,7 @@ function App() {
     }
 
     fetchCatalog()
-    const interval = setInterval(fetchCatalog, 10000)
-    return () => clearInterval(interval)
+    // Removed the 10-second interval to stop the blinking/flashing issue
   }, [])
 
   const allNumbers = useMemo(() => Object.values(catalog).flat(), [catalog])

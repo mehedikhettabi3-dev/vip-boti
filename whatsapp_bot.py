@@ -141,26 +141,55 @@ def get_all_numbers():
             nums.append(item)
     return nums
 
+# Regex to extract Moroccan phone numbers from messy user input
+_MOROCCAN_PHONE_RE = re.compile(
+    r'(?:(?:\+?212|00212)[\s.-]?)?'   # optional country code: +212, 212, 00212
+    r'(0[5-7])'                         # mandatory: leading 05/06/07
+    r'[\s./-]?'                         # optional separator
+    r'(\d{1,2})[\s./-]?(\d{1,2})'     # next digit groups
+    r'[\s./-]?(\d{1,2})[\s./-]?(\d{1,2})' # remaining groups
+)
+
+def _extract_moroccan_numbers(text):
+    """Extract all plausible Moroccan mobile numbers from text, return as 10-digit strings."""
+    candidates = []
+    for m in _MOROCCAN_PHONE_RE.finditer(text):
+        raw = ''.join(m.groups())
+        digits = ''.join(filter(str.isdigit, raw))
+        if len(digits) == 10 and digits[0] == '0':
+            candidates.append(digits)
+    # Fallback: brute-force strip all digits if regex found nothing
+    if not candidates:
+        all_digits = ''.join(filter(str.isdigit, text))
+        # Strip leading 212 or 00212
+        for prefix in ('00212', '212'):
+            if all_digits.startswith(prefix):
+                all_digits = '0' + all_digits[len(prefix):]
+                break
+        if len(all_digits) >= 10 and all_digits[0] == '0':
+            candidates.append(all_digits[:10])
+    return candidates
+
 def find_number_in_catalog(text):
     """
     Find a VIP number in catalog from user text.
-    Supports: raw numbers, Arabic queries (رقم، عندك، كاين), and partial matches
+    Uses robust Moroccan phone regex to handle spaces, dashes, country codes.
     Returns: (item, tier) or (None, None)
     """
     catalog = load_json(CATALOG_FILE, {})
+    candidates = _extract_moroccan_numbers(text)
+    if not candidates:
+        return None, None
     
-    # Extract ALL digits from text
-    digits = "".join(filter(str.isdigit, text))
-    if len(digits) < 9: return None, None
-    
-    # Check for exact or partial match in catalog
-    for tier, items in catalog.items():
-        for item in items:
-            if item.get("status", "available") != "available": continue
-            item_digits = "".join(filter(str.isdigit, item["number"]))
-            # Match full number or last 9 digits
-            if digits in item_digits or item_digits.endswith(digits[-9:]) or digits == item_digits:
-                return item, tier
+    for candidate in candidates:
+        for tier, items in catalog.items():
+            for item in items:
+                if item.get("status", "available") != "available":
+                    continue
+                item_digits = "".join(filter(str.isdigit, item["number"]))
+                # Match: full 10-digit, or last 9 digits
+                if candidate == item_digits or candidate[1:] == item_digits[1:]:
+                    return item, tier
     
     return None, None
 
@@ -410,10 +439,15 @@ def handle_logic(sender, text):
     sessions = load_json(SESSIONS_FILE, {})
     raw_text = text.strip()
 
-    # — NOTIFY ADMIN (Immediate) —
+    # — NOTIFY ADMIN (Immediate, failure-safe) —
     if sender != ADMIN_PHONE:
         logging.info(f"🔔 [NOTIFY ADMIN] New message from {sender}")
-        threading.Thread(target=send_whatsapp, args=(ADMIN_PHONE, f"📩 *ميساج جديد من {sender}:*\n\"{raw_text}\"")).start()
+        def _safe_admin_notify(phone, msg):
+            try:
+                send_whatsapp(phone, msg)
+            except Exception as e:
+                logging.error(f"❌ [ADMIN NOTIFY FAIL] {e}")
+        threading.Thread(target=_safe_admin_notify, args=(ADMIN_PHONE, f"📩 *ميساج جديد من {sender}:*\n\"{raw_text}\"")).start()
 
     # — ADMIN: no lead/name flow; commands only (non-commands: clear stale session, no reply) —
     if sender == ADMIN_PHONE:
@@ -466,7 +500,7 @@ def handle_logic(sender, text):
             vip_item = session.get("vip_item")
             interest = f"🎯 مهتم بـ: *{vip_item['number']}*" if vip_item else "👀 استفسار عام"
             alert = pick_response("admin_new_lead", sender=sender, message=f"{name}: {first_msg}"[:100], interest=interest, time=datetime.now().strftime('%H:%M:%S'))
-            threading.Thread(target=send_whatsapp, args=(ADMIN_PHONE, alert)).start()
+            threading.Thread(target=_safe_admin_notify, args=(ADMIN_PHONE, alert)).start()
             
             if vip_item:
                 # If they already picked a number, move to city request directly

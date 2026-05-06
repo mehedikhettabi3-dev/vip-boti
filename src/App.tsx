@@ -140,6 +140,10 @@ function App() {
   const [welcomeVisible, setWelcomeVisible] = useState(false)
   const [copiedNumber, setCopiedNumber] = useState(null)
   const [spotlightIndex, setSpotlightIndex] = useState(0)
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatMessages, setChatMessages] = useState([{ role: 'bot', text: 'Salam! 👋 Kifach nqder n3awnek? 💬' }])
+  const [chatInput, setChatInput] = useState('')
+  const [sendingChat, setSendingChat] = useState(false)
 
   const mouseX = useMotionValue(0)
   const mouseY = useMotionValue(0)
@@ -260,6 +264,34 @@ function App() {
   const handlePointerMove = (event) => {
     mouseX.set(event.clientX / window.innerWidth - 0.5)
     mouseY.set(event.clientY / window.innerHeight - 0.5)
+  }
+
+  const sendChatMessage = async () => {
+    if (!chatInput.trim()) return
+    
+    setSendingChat(true)
+    const userMsg = chatInput.trim()
+    setChatInput('')
+    setChatMessages(prev => [...prev, { role: 'user', text: userMsg }])
+
+    try {
+      const response = await fetch('https://vip-boti.onrender.com/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: userMsg, sender: 'web_' + Date.now() })
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setChatMessages(prev => [...prev, { role: 'bot', text: data.response || 'Thank you! 😊' }])
+      } else {
+        setChatMessages(prev => [...prev, { role: 'bot', text: 'Sorry, service unavailable 🤖' }])
+      }
+    } catch (error) {
+      setChatMessages(prev => [...prev, { role: 'bot', text: 'Connection error 📡' }])
+    } finally {
+      setSendingChat(false)
+    }
   }
 
   const tierStyle = (tier) => {
@@ -435,6 +467,118 @@ function App() {
         <p className="font-semibold tracking-[0.25em] text-purple-200">INWI VIP NUMBER</p>
         <p className="mt-2">Premium purple luxury marketplace.</p>
       </footer>
+
+      {/* Floating WhatsApp Button */}
+      <motion.a
+        href="https://wa.me/212638388885?text=Salam%20VIP%20Bot%21"
+        target="_blank"
+        rel="noreferrer"
+        initial={{ scale: 0 }}
+        animate={{ scale: 1 }}
+        whileHover={{ scale: 1.1 }}
+        className="fixed bottom-8 right-8 z-50 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-r from-green-400 via-emerald-500 to-green-600 text-white shadow-lg shadow-green-500/50 transition hover:shadow-xl hover:shadow-green-500/70"
+      >
+        <motion.div animate={{ rotate: 360 }} transition={{ duration: 3, repeat: Infinity }} className="absolute inset-0 rounded-full border-2 border-green-300/30" />
+        <MessageCircle size={28} />
+      </motion.a>
+
+      {/* Chat Widget */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: chatOpen ? 1 : 0, y: chatOpen ? 0 : 20, pointerEvents: chatOpen ? 'auto' : 'none' }}
+        transition={{ duration: 0.3 }}
+        className="fixed bottom-28 right-8 z-50 w-80 rounded-3xl border border-amber-200/20 bg-gradient-to-br from-slate-900 via-slate-950 to-black shadow-2xl shadow-purple-900/50"
+      >
+        {/* Chat Header */}
+        <div className="flex items-center justify-between rounded-t-3xl bg-gradient-to-r from-purple-900 via-purple-800 to-purple-900 p-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-200 text-purple-900">
+              <MessageCircle size={18} />
+            </div>
+            <div>
+              <p className="text-sm font-black text-white">VIP Bot 🤖</p>
+              <p className="text-xs text-green-200">● Online</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setChatOpen(false)}
+            className="rounded-full p-1 text-white hover:bg-white/10"
+          >
+            <ChevronRight size={20} className="rotate-180" />
+          </button>
+        </div>
+
+        {/* Chat Messages */}
+        <div className="h-80 overflow-y-auto space-y-3 p-4 bg-black/40">
+          {chatMessages.map((msg, idx) => (
+            <motion.div
+              key={idx}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              <div
+                className={`max-w-xs rounded-2xl px-4 py-2 text-sm ${
+                  msg.role === 'user'
+                    ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-black font-semibold'
+                    : 'bg-gradient-to-r from-purple-700 to-purple-900 text-white'
+                }`}
+              >
+                {msg.text}
+              </div>
+            </motion.div>
+          ))}
+          {sendingChat && (
+            <div className="flex justify-start">
+              <div className="bg-gradient-to-r from-purple-700 to-purple-900 rounded-2xl px-4 py-2">
+                <span className="inline-flex gap-1">
+                  <span className="h-2 w-2 rounded-full bg-white animate-bounce" />
+                  <span className="h-2 w-2 rounded-full bg-white animate-bounce delay-100" />
+                  <span className="h-2 w-2 rounded-full bg-white animate-bounce delay-200" />
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Chat Input */}
+        <div className="border-t border-amber-200/10 bg-black/60 p-3 rounded-b-3xl">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && sendChatMessage()}
+              placeholder="صيفط رسالة..."
+              className="flex-1 rounded-full bg-slate-700/50 px-4 py-2 text-sm text-white placeholder-stone-400 outline-none border border-amber-200/10 focus:border-amber-200/30 transition"
+            />
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={sendChatMessage}
+              disabled={sendingChat || !chatInput.trim()}
+              className="rounded-full bg-gradient-to-r from-amber-500 to-yellow-600 p-2.5 text-white disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-lg hover:shadow-amber-500/50 transition"
+            >
+              <ChevronRight size={18} className="-rotate-90" />
+            </motion.button>
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Chat Toggle Button */}
+      <motion.button
+        onClick={() => setChatOpen(!chatOpen)}
+        whileHover={{ scale: 1.1 }}
+        whileTap={{ scale: 0.95 }}
+        className="fixed bottom-28 right-8 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-r from-purple-600 via-purple-700 to-purple-800 text-white shadow-lg shadow-purple-600/50 transition"
+      >
+        <motion.div
+          animate={{ rotate: chatOpen ? 180 : 0 }}
+          transition={{ duration: 0.3 }}
+        >
+          <MessageCircle size={24} />
+        </motion.div>
+      </motion.button>
     </main>
   )
 }

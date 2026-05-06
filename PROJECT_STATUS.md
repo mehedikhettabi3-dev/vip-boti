@@ -4,23 +4,18 @@ Everything is now synchronized and production-ready in your VS Code workspace. H
 
 ## ✅ 1. Completed & Updated Files
 - **`whatsapp_bot.py`**: 
-    - **DeepSeek AI**: Fully integrated via OpenRouter/Direct API for advanced Darija support.
-    - **Admin Suite**: Added `!stats`, `!sold`, `!add`, `!price`, `!delete`, `!reset`, and `!image`.
-    - **Web Chat API**: Added `/api/chat` to support the landing page chatbot.
-    - **Indentation & Cleanup**: Fixed all syntax errors and removed unused Gemini imports.
-- **`index.html`**: 
-    - **Premium UI**: Merged the high-end design from `index2.html`.
-    - **Filtering**: Live filtering by Tier (Diamond/Platinum).
-    - **Chatbot**: Integrated with the backend API for real-time responses.
-- **`marketing_engine.py`**: Validated and ready to generate the visual `catalog.jpg`.
-- **`requirements.txt`**: Updated with `python-dotenv` and `Pillow`.
+    - **Deterministic replies**: All customer text uses `responses.json` (no LLM in the hot path).
+    - **Admin Suite**: `!stats`, `!sold`, `!add`, `!delete`, `!reset`, `!test`, `!help`.
+    - **Web Chat API**: `/api/chat` for the React site widget.
+    - **Config**: Env-first (`ACCESS_TOKEN`, `PHONE_NUMBER_ID`, `ADMIN_PHONE`, `VERIFY_TOKEN`, `CATALOG_URL`) with optional local `api_keys.json` fallback.
+- **`src/App.tsx`**: Premium React UI; catalog + chat use `VITE_API_URL` (see `.env.example`).
+- **`requirements.txt`**: Includes `python-dotenv` and Flask stack.
 
 ## ⚙️ 2. Configuration Requirements (Your Action Needed)
-To make everything work perfectly, ensure your `.env` file (or `api_keys.json`) has these values:
-- `ACCESS_TOKEN`: Your Meta WhatsApp Permanent Token.
-- `PHONE_NUMBER_ID`: The ID from your Meta Developer App.
-- `DEEPSEEK_API_KEY` or `OPENROUTER_API_KEY`: For the AI brain.
-- `GHL_WEBHOOK_URL`: Your Integrately/GoHighLevel endpoint.
+To make everything work perfectly, set environment variables on Render (or `.env` locally). See `.env.example`:
+- `ACCESS_TOKEN`, `PHONE_NUMBER_ID`, `VERIFY_TOKEN`, `ADMIN_PHONE`, `CATALOG_URL`
+- `VITE_API_URL` for frontend builds (Netlify/Vercel)
+- Optional local-only: `api_keys.json` (gitignored) for development fallback
 
 ## 🚀 3. Pending Steps for Final Success
 1. **Local Testing**:

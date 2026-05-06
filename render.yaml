@@ -10,3 +10,17 @@ services:
         value: 10000
       - key: PYTHON_VERSION
         value: 3.11
+      - key: ACCESS_TOKEN
+        sync: false
+      - key: PHONE_NUMBER_ID
+        sync: false
+      - key: VERIFY_TOKEN
+        value: vip_bot_2026
+      - key: ADMIN_PHONE
+        sync: false
+      - key: CATALOG_URL
+        value: https://vip-boti.onrender.com
+      - key: DASHBOARD_USER
+        sync: false
+      - key: DASHBOARD_PASS
+        sync: false

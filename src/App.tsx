@@ -12,9 +12,39 @@ type VipNumber = {
 type Catalog = Record<string, VipNumber[]>
 
 const API_URL = 'https://vip-boti.onrender.com/api/full_catalog'
+const CLICK_TRACKING_URL = 'https://vip-boti.onrender.com/api/whatsapp-click'
 const HERO_NUMBER = '07 03 31 33 13'
 const WHATSAPP_BASE = 'https://wa.me/212638388885?text='
 const BRAND_NAME = 'Inwi VIP Number'
+
+const trackWhatsAppClick = async (number: string, price: string, tier: string) => {
+  try {
+    const response = await fetch(CLICK_TRACKING_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        number: number.replace(/\s/g, ''),
+        price,
+        tier,
+        sender: `Web User - ${new Date().toLocaleString()}`
+      })
+    })
+    if (response.ok) {
+      const data = await response.json()
+      if (data.redirect) return data.redirect
+    }
+  } catch (err) {
+    console.error('Tracking failed:', err)
+  }
+  return WHATSAPP_BASE + encodeURIComponent(price && tier ? 'Salam, bghit nreservi had nmra VIP: ' + number + ' - ' + price + ' - Tier: ' + tier : number)
+}
+
+const handleWhatsAppClick = (e: React.MouseEvent<HTMLAnchorElement>, number: string, price: string, tier: string) => {
+  e.preventDefault()
+  trackWhatsAppClick(number, price, tier).then(url => {
+    window.open(url, '_blank')
+  })
+}
 
 const fallbackCatalog: Catalog = {
   Diamond: [
@@ -318,7 +348,7 @@ function App() {
             <span className="inline-flex items-center gap-1 rounded-lg bg-black/60 px-2 py-1 text-xs font-semibold text-amber-300">⚡ {rarityScore}%</span>
           </div>
           <div className="mt-4 flex gap-2">
-            <a href={isSold ? '#' : getWhatsAppUrl(item.number, item.price, tier)} target={isSold ? '_self' : '_blank'} rel="noreferrer" className={'flex-1 inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-black uppercase tracking-[0.14em] transition ' + (isSold ? 'border-stone-800 bg-stone-900 text-stone-500 cursor-not-allowed' : 'border-amber-200/20 bg-gradient-to-r from-amber-200 via-yellow-500 to-amber-700 text-black shadow-[0_14px_40px_rgba(245,158,11,0.18)] hover:scale-[1.01] hover:from-amber-100 hover:to-yellow-500')} onClick={(e) => isSold && e.preventDefault()}><MessageCircle size={18} /> {isSold ? 'Sold Out' : 'Order'}</a>
+            <a href="#" onClick={(e) => !isSold && handleWhatsAppClick(e, item.number, item.price, tier)} className={'flex-1 inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-black uppercase tracking-[0.14em] transition ' + (isSold ? 'border-stone-800 bg-stone-900 text-stone-500 cursor-not-allowed' : 'border-amber-200/20 bg-gradient-to-r from-amber-200 via-yellow-500 to-amber-700 text-black shadow-[0_14px_40px_rgba(245,158,11,0.18)] hover:scale-[1.01] hover:from-amber-100 hover:to-yellow-500')}><MessageCircle size={18} /> {isSold ? 'Sold Out' : 'Order'}</a>
             <button onClick={() => copyNumber(item.number)} className={'flex items-center justify-center rounded-2xl px-3 py-3 transition ' + (isCopied ? 'bg-emerald-500/30 border border-emerald-400' : 'bg-black/40 border border-stone-600 hover:border-amber-400/60')}>{isCopied ? <Check size={18} className="text-emerald-300" /> : <Copy size={18} className="text-stone-400" />}</button>
           </div>
         </div>
@@ -357,7 +387,7 @@ function App() {
               <p className="mt-12 text-sm uppercase tracking-[0.35em] text-stone-500">Top Selection</p>
               <p className="mt-4 font-mono text-4xl font-black tracking-[0.08em] text-white sm:text-5xl">{HERO_NUMBER}</p>
               <div className="mt-8 rounded-2xl bg-gradient-to-r from-amber-200 via-yellow-500 to-amber-700 p-[1px]"><div className="rounded-2xl bg-black px-5 py-4"><p className="text-sm text-stone-400">Reservation price</p><p className="mt-1 text-3xl font-black text-amber-200">{heroItem.price}</p></div></div>
-              <a href={getWhatsAppUrl(HERO_NUMBER)} target="_blank" rel="noreferrer" className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-200 via-yellow-500 to-amber-700 px-5 py-4 text-sm font-black uppercase tracking-[0.18em] text-black transition hover:scale-[1.01]"><MessageCircle size={18} /> Order via WhatsApp</a>
+              <a href="#" onClick={(e) => handleWhatsAppClick(e, HERO_NUMBER, heroItem.price, 'Diamond')} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-200 via-yellow-500 to-amber-700 px-5 py-4 text-sm font-black uppercase tracking-[0.18em] text-black transition hover:scale-[1.01]"><MessageCircle size={18} /> Order via WhatsApp</a>
             </div>
           </div>
         </motion.div>

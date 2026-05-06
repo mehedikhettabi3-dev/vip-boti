@@ -6,6 +6,7 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
+from urllib.parse import quote
 
 load_dotenv()
 try:
@@ -740,6 +741,41 @@ def api_chat():
         reply = handle_logic(sender, user_text)
         return jsonify({"response": reply or ""})
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/whatsapp-click", methods=["POST"])
+def api_whatsapp_click():
+    try:
+        data = request.get_json(force=True)
+        number = data.get("number", "").strip()
+        price = data.get("price", "N/A").strip()
+        tier = data.get("tier", "VIP").strip()
+        sender_info = data.get("sender", "")
+        user_agent = request.headers.get("User-Agent", "")
+        ip_address = request.environ.get("HTTP_X_FORWARDED_FOR", request.remote_addr)
+
+        if not number:
+            return jsonify({"error": "number required"}), 400
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        admin_alert = (
+            f"🔥 *كليك على رقم VIP من الويب!*\n"
+            f"📱 الرقم: *{number}*\n"
+            f"💰 السعر: *{price}*\n"
+            f"🎯 المستوى: *{tier}*\n"
+            f"👤 المعلومات: {sender_info or 'N/A'}\n"
+            f"🌐 IP: {ip_address}\n"
+            f"⏰ الوقت: {timestamp}\n"
+            f"📊 الجهاز: {user_agent[:60]}\n\n"
+            f"👉 اضغط للتواصل: https://wa.me/{ADMIN_PHONE}"
+        )
+
+        send_whatsapp_async(ADMIN_PHONE, admin_alert)
+        logging.info(f"✅ [WHATSAPP CLICK] Number: {number} | Tier: {tier} | Price: {price} | IP: {ip_address}")
+
+        return jsonify({"ok": True, "redirect": f"https://wa.me/212638388885?text={quote(f'Salam, bghit nreservi had nmra VIP: {number} - {price} - Tier: {tier}')}"})
+    except Exception as e:
+        logging.error(f"❌ [WHATSAPP CLICK ERROR] {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/static/<path:filename>")

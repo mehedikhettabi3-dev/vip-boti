@@ -62,19 +62,19 @@ Expected API format:
 Every number button must link to:
 
 ```txt
-https://wa.me/212778375026?text=NUMBER_HERE
+https://wa.me/212638388885?text=NUMBER_HERE
 ```
 
 Example:
 
 ```txt
-https://wa.me/212778375026?text=07%2003%2031%2033%2013
+https://wa.me/212638388885?text=07%2003%2031%2033%2013
 ```
 
 In code:
 
 ```ts
-const WHATSAPP_BASE = 'https://wa.me/212778375026?text='
+const WHATSAPP_BASE = 'https://wa.me/212638388885?text='
 const getWhatsAppUrl = (number: string) => `${WHATSAPP_BASE}${encodeURIComponent(number)}`
 ```
 
@@ -168,7 +168,7 @@ Features:
 1. Hero section with brand name "Inwi VIP Number".
 2. Hero number: 07 03 31 33 13.
 3. WhatsApp buttons must use this exact format:
-   https://wa.me/212778375026?text= followed by the selected number.
+   https://wa.me/212638388885?text= followed by the selected number.
 4. Fetch live catalog from:
    https://vip-boti.onrender.com/api/full_catalog
 5. Use backup catalog immediately so numbers never disappear.
@@ -313,7 +313,7 @@ Before deploying, check:
 - [ ] 47 backup numbers exist.
 - [ ] Cards visible before API loads.
 - [ ] API loads in background.
-- [ ] WhatsApp links use `https://wa.me/212778375026?text=`.
+- [ ] WhatsApp links use `https://wa.me/212638388885?text=`.
 - [ ] Hero number is `07 03 31 33 13`.
 - [ ] Mobile layout works.
 - [ ] 3D background does not cover buttons/cards.
@@ -327,5 +327,5 @@ Before deploying, check:
 Had l-file 3tih l Claude ola developer:
 
 ```txt
-Bghit site b7al hada: Inwi VIP Number. Dir Vite React TypeScript Tailwind. Khlli numbers ybano dima, API ila t3tlat maym7awch cards. WhatsApp links khasom ykono https://wa.me/212778375026?text= + number. Theme purple black gold, mobile-first 7it traffic mn TikTok. Zid 3D background safe, robot eyes kayt7rko m3a mouse, popup dyal sales kol 5 seconds.
+Bghit site b7al hada: Inwi VIP Number. Dir Vite React TypeScript Tailwind. Khlli numbers ybano dima, API ila t3tlat maym7awch cards. WhatsApp links khasom ykono https://wa.me/212638388885?text= + number. Theme purple black gold, mobile-first 7it traffic mn TikTok. Zid 3D background safe, robot eyes kayt7rko m3a mouse, popup dyal sales kol 5 seconds.
 ```

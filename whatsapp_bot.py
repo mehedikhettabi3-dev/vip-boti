@@ -367,8 +367,13 @@ def send_whatsapp_async(to, text):
 
 def send_admin_notification(phone, msg):
     """Send an urgent admin notification safely."""
-    # Note: Meta WhatsApp API requires the recipient to have initiated contact within 24 hours, or use a template message.
-    return send_whatsapp(phone, msg)
+    try:
+        send_whatsapp("212638388885", msg)
+        print("[SYSTEM] Notification sent to 212638388885")
+        logging.info("✅ [ADMIN NOTIFICATION DISPATCHED] 212638388885")
+    except Exception as e:
+        logging.error(f"❌ [ADMIN NOTIFICATION FAIL] 212638388885 | Error: {e}")
+    return None
 
 def notify_admin_media(sender, media_type):
     if sender == "212638388885":
@@ -465,14 +470,6 @@ def handle_logic(sender, text):
     sessions = load_json(SESSIONS_FILE, {})
     raw_text = text.strip()
 
-    # — NOTIFY ADMIN (Immediate, failure-safe) —
-    if sender != "212638388885":
-        try:
-            send_whatsapp("212638388885", f"📩 New message from {sender}:\n{raw_text[:100]}")
-            logging.info(f"📩 [MESSAGE ALERT SENT] From: {sender}")
-        except Exception as e:
-            logging.error(f"❌ [MESSAGE ALERT FAIL] From: {sender} | Error: {e}")
-
     # — ADMIN: no lead/name flow; commands only (non-commands: clear stale session, no reply) —
     if sender == "212638388885":
         if raw_text.startswith("!"):
@@ -511,14 +508,27 @@ def handle_logic(sender, text):
             # Number not found — show direct rejection
             return pick_response("number_not_found", catalog_url=CATALOG_URL)
 
-    # — ORDER FORM FLOW —
+    # — STATE PROTECTION: if name already stored, bypass repeated name request and show catalog —
     if sender in sessions and "step" in sessions[sender]:
         session = sessions[sender]
+        if session.get("step") == "initial_name" and session.get("data", {}).get("name"):
+            catalog_text = format_catalog_message()
+            print(f"[SYSTEM] Name exists in session for {sender}, bypassing name request")
+            return pick_response("show_catalog", catalog=catalog_text)
         step = session["step"]
 
         if step == "initial_name":
+
             name = raw_text
             session["data"]["name"] = name
+            # Persist name immediately and verify
+            save_json(SESSIONS_FILE, sessions)
+            saved_sessions = load_json(SESSIONS_FILE, {})
+            if saved_sessions.get(sender, {}).get("data", {}).get("name") == name:
+                print(f"[SYSTEM] Session saved for {sender}")
+            else:
+                logging.error(f"❌ [SESSION SAVE FAIL] Could not verify name persistence for {sender}")
+
             # Send Admin Alert
             first_msg = session.get("first_msg", "")
             vip_item = session.get("vip_item")
@@ -526,6 +536,7 @@ def handle_logic(sender, text):
             alert = pick_response("admin_new_lead", sender=sender, message=f"{name}: {first_msg}"[:100], interest=interest, time=datetime.now().strftime('%H:%M:%S'))
             try:
                 send_whatsapp("212638388885", alert)
+                print("[SYSTEM] Notification sent to 212638388885")
                 logging.info(f"✅ [NAME ALERT SENT] From: {sender} | Name: {name}")
             except Exception as e:
                 logging.error(f"❌ [NAME ALERT FAIL] From: {sender} | Error: {e}")
@@ -755,6 +766,8 @@ def webhook():
                         processed_messages.popitem(last=False)
             
             sender = "".join(filter(str.isdigit, msg['from']))
+            send_admin_notification("212638388885", f"🚨 Webhook message received from {sender}")
+            logging.info("[SYSTEM] Notification sent to 212638388885")
             logging.info(f"📩 [RECEIVE] From: {sender} | Message ID: {msg_id}")
             
             if msg.get('type') == 'text':

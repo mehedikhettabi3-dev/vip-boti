@@ -1,4 +1,5 @@
 import os, sys, json, logging, random, re, requests, threading, functools, html, time, atexit
+from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
 from flask import Flask, request, jsonify, send_file, Response, send_from_directory
@@ -19,7 +20,7 @@ except Exception: pass
 # ============================================================
 def get_config():
     try:
-        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "api_keys.json")
+        p = str(Path(__file__).resolve().parent / "api_keys.json")
         if os.path.exists(p):
             with open(p, "r", encoding="utf-8") as f: return json.load(f)
     except Exception: pass
@@ -56,7 +57,7 @@ API_URL = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
 # ============================================================
 # 📋  LOGGING
 # ============================================================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = str(Path(__file__).resolve().parent)
 _log_path = os.path.join(BASE_DIR, "log.txt")
 _fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
 _sh = logging.StreamHandler()
@@ -80,26 +81,34 @@ ORDERS_FILE   = os.path.join(BASE_DIR, "orders.json")
 LEADS_FILE    = os.path.join(BASE_DIR, "known_leads.json")
 RESPONSES_FILE = os.path.join(BASE_DIR, "responses.json")
 
-shared_lock = threading.Lock()
+shared_lock = threading.RLock()
 # Use OrderedDict for processed_messages to avoid unbounded growth (LRU cache)
 processed_messages = OrderedDict()
 MAX_PROCESSED_MESSAGES = 1000  # Keep only last 1000 message IDs in memory
 
 # Thread pool for WhatsApp sending (prevents thread explosion)
-whatsapp_executor = ThreadPoolExecutor(max_workers=5)
+whatsapp_executor = ThreadPoolExecutor(max_workers=15)
 
+def with_lock(f):
+    """Decorator to ensure thread-safety for state-modifying functions."""
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        with shared_lock:
+            return f(*args, **kwargs)
+    return wrapper
+
+@with_lock
 def load_json(path, default):
-    with shared_lock:
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f: return json.load(f)
-            except: pass
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f: return json.load(f)
+        except: pass
     return default
 
+@with_lock
 def save_json(path, data):
-    with shared_lock:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
 
 def _touch_session(sess):
     """Unix timestamp for session TTL cleanup (keep_alive)."""
@@ -209,15 +218,16 @@ def is_direct_number_query(text):
 def format_catalog_message():
     catalog = load_json(CATALOG_FILE, {})
     
-    # إذا كان الكتالوج فارغ — رد تنبيه
-    if not catalog:
+    # Safety check for empty or invalid catalog
+    if not catalog or not isinstance(catalog, dict):
         return "⚠️ الكتالوج فارغ دابا — أضف نوامر دابا باش تشوفهم هنا! 📋"
     
     lines = ["🌟 *أرقام VIP المتوفرة حالياً:* \n"]
     has_available = False
     
     for tier, items in catalog.items():
-        available = [i for i in items if i.get("status", "available") == "available"]
+        if not isinstance(items, list): continue
+        available = [i for i in items if isinstance(i, dict) and i.get("status", "available") == "available"]
         if not available: continue
         has_available = True
         lines.append(f"🔹 *{tier.upper()}:*")
@@ -233,6 +243,7 @@ def format_catalog_message():
     lines.append("\nصيفط ليا الرقم اللي عجبك باش نكملو! 🚀")
     return "\n".join(lines)
 
+@with_lock
 def mark_number_sold(number_str):
     catalog = load_json(CATALOG_FILE, {})
     clean_target = "".join(filter(str.isdigit, str(number_str)))
@@ -286,14 +297,14 @@ def detect_intent(text):
     t = text.lower().strip()
     words = set(re.split(r'\s+', t))
     
-    # --- PRIORITY 1: CATALOG (most important — prevents greeting override) ---
-    for kw in CATALOG_KW:
-        if kw in t: return "show_catalog"
-    
-    # --- PRIORITY 2: DIRECT NUMBER QUERY ---
+    # --- PRIORITY 1: DIRECT NUMBER QUERY (Increased Priority) ---
     digits = "".join(filter(str.isdigit, t))
     if len(digits) >= 9 and is_direct_number_query(t):
         return "number_inquiry"
+    
+    # --- PRIORITY 2: CATALOG (prevents greeting override) ---
+    for kw in CATALOG_KW:
+        if kw in t: return "show_catalog"
     
     # --- PRIORITY 3: CHECK FOR CONTACT REQUEST ---
     has_verb = any(v in t for v in CONTACT_VERBS)
@@ -425,7 +436,7 @@ def handle_admin_command(sender, text):
         save_json(SESSIONS_FILE, {})
         return "♻️ تم تصفير الجلسات."
     if base == "!test":
-        threading.Thread(target=send_whatsapp, args=(ADMIN_PHONE, "🔔 اختبار — الإشعارات خدامة! ✅")).start()
+        send_whatsapp_async(ADMIN_PHONE, "🔔 اختبار — الإشعارات خدامة! ✅")
         return "✅ تم إرسال اختبار."
     return "🛠️ أمر غير معروف. صيفط `!help`"
 
@@ -435,11 +446,13 @@ def handle_admin_command(sender, text):
 def _get_known_leads():
     return set(load_json(LEADS_FILE, []))
 
+@with_lock
 def _save_known_lead(sender):
     leads = _get_known_leads()
     leads.add(sender)
     save_json(LEADS_FILE, list(leads))
 
+@with_lock
 def handle_logic(sender, text):
     sessions = load_json(SESSIONS_FILE, {})
     raw_text = text.strip()
@@ -447,12 +460,7 @@ def handle_logic(sender, text):
     # — NOTIFY ADMIN (Immediate, failure-safe) —
     if sender != ADMIN_PHONE:
         logging.info(f"🔔 [NOTIFY ADMIN] New message from {sender}")
-        def _safe_admin_notify(phone, msg):
-            try:
-                send_whatsapp(phone, msg)
-            except Exception as e:
-                logging.error(f"❌ [ADMIN NOTIFY FAIL] {e}")
-        threading.Thread(target=_safe_admin_notify, args=(ADMIN_PHONE, f"📩 *ميساج جديد من {sender}:*\n\"{raw_text}\"")).start()
+        send_whatsapp_async(ADMIN_PHONE, f"📩 *ميساج جديد من {sender}:*\n\"{raw_text}\"")
 
     # — ADMIN: no lead/name flow; commands only (non-commands: clear stale session, no reply) —
     if sender == ADMIN_PHONE:
@@ -505,7 +513,7 @@ def handle_logic(sender, text):
             vip_item = session.get("vip_item")
             interest = f"🎯 مهتم بـ: *{vip_item['number']}*" if vip_item else "👀 استفسار عام"
             alert = pick_response("admin_new_lead", sender=sender, message=f"{name}: {first_msg}"[:100], interest=interest, time=datetime.now().strftime('%H:%M:%S'))
-            threading.Thread(target=_safe_admin_notify, args=(ADMIN_PHONE, alert)).start()
+            send_whatsapp_async(ADMIN_PHONE, alert)
             
             if vip_item:
                 # If they already picked a number, move to city request directly
@@ -552,10 +560,10 @@ def handle_logic(sender, text):
                 f"city={city}\n"
                 f"time={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             )
-            send_whatsapp(ADMIN_PHONE, backup_summary)
+            send_whatsapp_async(ADMIN_PHONE, backup_summary)
             mark_number_sold(vip_num)
             admin_msg = pick_response("admin_order", number=vip_num, name=name or "?", city=city or "?", phone="واتساب", sender=sender)
-            send_whatsapp(ADMIN_PHONE, admin_msg)
+            send_whatsapp_async(ADMIN_PHONE, admin_msg)
             sessions.pop(sender, None)
             save_json(SESSIONS_FILE, sessions)
             return pick_response("order_complete", number=vip_num, name=name, city=city)
@@ -730,10 +738,8 @@ def webhook():
                 if sender != ADMIN_PHONE:
                     known_leads = _get_known_leads()
                     if sender not in known_leads:
-                        try:
-                            send_admin_notification("212638388885", f"🚨 New Lead Clicked: {sender}")
-                        except Exception as e:
-                            logging.error(f"❌ [ADMIN ALERT FAIL] {e}")
+                        # Fire and forget admin notification
+                        send_whatsapp_async("212638388885", f"🚨 New Lead Clicked: {sender}")
                 reply = handle_logic(sender, body)
                 if reply:  # Only send if there's a reply
                     send_whatsapp_async(sender, reply)
@@ -747,9 +753,11 @@ def webhook():
         return "ok", 200
     except Exception as e:
         logging.error(f"❌ [WEBHOOK ERROR]: {e}")
-        return "error", 500
+        # Always return 200 to Meta to prevent retry loops on processing errors
+        return "ok", 200
 
 @app.route("/api/register", methods=["POST"])
+@with_lock
 def api_register():
     """Register a phone number to receive bot notifications and updates"""
     try:
@@ -770,7 +778,7 @@ def api_register():
         
         # Send welcome message
         msg = f"✨ مرحبا {name or 'سيدي'}! \n\n✅ تم تسجيلك بنجاح!\n\nستتلقى من الآن الجديد من الأرقام المتاحة والعروضات. 🎯\n\nصيفط ليا الرقم اللي بغيت باش نكملو 📞"
-        threading.Thread(target=send_whatsapp, args=(phone, msg)).start()
+        send_whatsapp_async(phone, msg)
         
         return jsonify({"ok": True, "message": "✅ تم التسجيل بنجاح!", "phone": phone}), 200
     except Exception as e:
@@ -813,11 +821,16 @@ def api_whatsapp_click():
             f"🌐 IP: {ip_address}\n"
             f"⏰ الوقت: {timestamp}\n"
             f"📊 الجهاز: {user_agent[:60]}\n\n"
-            f"👉 اضغط للتواصل: https://wa.me/{ADMIN_PHONE}"
+            f"👉 اضغط للتواصل: https://wa.me/212638388885"
         )
 
-        send_whatsapp_async(ADMIN_PHONE, admin_alert)
-        logging.info(f"✅ [WHATSAPP CLICK] Number: {number} | Tier: {tier} | Price: {price} | IP: {ip_address}")
+        # Send notification directly to hardcoded admin phone (212638388885) with error logging
+        try:
+            send_whatsapp("212638388885", admin_alert)
+        except Exception as notify_err:
+            logging.error(f"❌ [ADMIN NOTIFY FAIL] Could not send notification: {notify_err}")
+        
+        logging.info(f"✅ [WHATSAPP CLICK] Number: {number} | Tier: {tier} | Price: {price} | IP: {ip_address} | Notification sent to admin")
 
         return jsonify({"ok": True, "redirect": f"https://wa.me/212638388885?text={quote(f'Salam, bghit nreservi had nmra VIP: {number} - {price} - Tier: {tier}')}"})
     except Exception as e:
@@ -846,6 +859,7 @@ def api_catalog_stats():
 
 @app.route("/api/catalog/manage", methods=["POST"])
 @require_auth
+@with_lock
 def api_catalog_manage():
     try:
         data = request.get_json(force=True)
@@ -966,14 +980,15 @@ def keep_alive():
             if counter >= 10:
                 counter = 0
                 try:
-                    sessions = load_json(SESSIONS_FILE, {})
-                    before = len(sessions)
-                    now = datetime.now().timestamp()
-                    # Remove sessions older than 24 hours
-                    sessions = {k: v for k, v in sessions.items() if now - v.get("timestamp", now) < 86400}
-                    save_json(SESSIONS_FILE, sessions)
-                    after = len(sessions)
-                    logging.info(f"🧹 [CLEANUP] Sessions: {before} → {after}")
+                    with shared_lock:
+                        sessions = load_json(SESSIONS_FILE, {})
+                        before = len(sessions)
+                        now = datetime.now().timestamp()
+                        # Remove sessions older than 24 hours
+                        sessions = {k: v for k, v in sessions.items() if now - v.get("timestamp", now) < 86400}
+                        save_json(SESSIONS_FILE, sessions)
+                        after = len(sessions)
+                        logging.info(f"🧹 [CLEANUP] Sessions: {before} → {after}")
                 except Exception as e:
                     logging.error(f"❌ [CLEANUP ERROR]: {e}")
         except Exception as e:

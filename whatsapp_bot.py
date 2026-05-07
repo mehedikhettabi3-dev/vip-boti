@@ -46,7 +46,7 @@ def normalize_whatsapp_phone(raw):
 ACCESS_TOKEN    = os.environ.get("ACCESS_TOKEN") or CFG.get("ACCESS_TOKEN", "")
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID") or CFG.get("PHONE_NUMBER_ID", "")
 VERIFY_TOKEN    = os.environ.get("VERIFY_TOKEN") or CFG.get("VERIFY_TOKEN", "vip_bot_2026")
-ADMIN_PHONE     = normalize_whatsapp_phone(os.environ.get("ADMIN_PHONE") or CFG.get("ADMIN_PHONE", "212625489153"))
+ADMIN_PHONE     = normalize_whatsapp_phone(os.environ.get("ADMIN_PHONE") or CFG.get("ADMIN_PHONE", "212638388885"))  # Fallback to hardcoded admin phone
 _default_catalog = "https://vip-boti.onrender.com"
 CATALOG_URL     = (os.environ.get("CATALOG_URL") or CFG.get("CATALOG_URL") or _default_catalog).rstrip("/")
 DASHBOARD_USER  = os.environ.get("DASHBOARD_USER") or CFG.get("DASHBOARD_USER", "admin")
@@ -143,9 +143,11 @@ def get_all_numbers():
 
 # Regex to extract Moroccan phone numbers from messy user input
 _MOROCCAN_PHONE_RE = re.compile(
-    r'(?:\b(?:num(?:ero)?|nimiro|nemiro|nomero|numero|número)\b[\s:,-]*)?'  # optional local keyword
-    r'(?:(?:\+?212|00212)[\s./-]?)?'   # optional country code: +212, 212, 00212
-    r'(?:0?)([5-7])[\s./-]?(\d{1,2})[\s./-]?(\d{1,2})[\s./-]?(\d{1,2})[\s./-]?(\d{1,2})'
+    r'(?:(?:\+?212|00212)[\s.-]?)?'   # optional country code: +212, 212, 00212
+    r'(0[5-7])'                         # mandatory: leading 05/06/07
+    r'[\s./-]?'                         # optional separator
+    r'(\d{1,2})[\s./-]?(\d{1,2})'     # next digit groups
+    r'[\s./-]?(\d{1,2})[\s./-]?(\d{1,2})' # remaining groups
 )
 
 def _extract_moroccan_numbers(text):
@@ -154,8 +156,6 @@ def _extract_moroccan_numbers(text):
     for m in _MOROCCAN_PHONE_RE.finditer(text):
         raw = ''.join(m.groups())
         digits = ''.join(filter(str.isdigit, raw))
-        if len(digits) == 9:
-            digits = "0" + digits
         if len(digits) == 10 and digits[0] == '0':
             candidates.append(digits)
     # Fallback: brute-force strip all digits if regex found nothing
@@ -172,7 +172,8 @@ def _extract_moroccan_numbers(text):
 
 def find_number_in_catalog(text):
     """
-    Find a VIP number from user text. Bypasses strict catalog validation.
+    Find a VIP number in catalog from user text.
+    Uses robust Moroccan phone regex to handle spaces, dashes, country codes.
     Returns: (item, tier) or (None, None)
     """
     catalog = load_json(CATALOG_FILE, {})
@@ -180,19 +181,17 @@ def find_number_in_catalog(text):
     if not candidates:
         return None, None
     
-    candidate = candidates[0]
+    for candidate in candidates:
+        for tier, items in catalog.items():
+            for item in items:
+                if item.get("status", "available") != "available":
+                    continue
+                item_digits = "".join(filter(str.isdigit, item["number"]))
+                # Match: full 10-digit, or last 9 digits
+                if candidate == item_digits or candidate[1:] == item_digits[1:]:
+                    return item, tier
     
-    # Try to find in catalog for actual price/tier
-    for tier, items in catalog.items():
-        for item in items:
-            item_digits = "".join(filter(str.isdigit, item["number"]))
-            # Match: full 10-digit, or last 9 digits
-            if candidate == item_digits or candidate[1:] == item_digits[1:]:
-                return item, tier
-                
-    # If not in catalog, accept it anyway (TASK 3)
-    formatted = f"{candidate[:2]} {candidate[2:4]} {candidate[4:6]} {candidate[6:8]} {candidate[8:]}"
-    return {"number": formatted, "price": "غير محدد", "status": "available", "tier": "Custom"}, "Custom"
+    return None, None
 
 def is_direct_number_query(text):
     """
@@ -203,8 +202,7 @@ def is_direct_number_query(text):
     # Keywords indicating direct number inquiry: "رقم", "عندك", "كاين", "donne", "envoie", "nomero"
     direct_keywords = [
         "رقم", "عندك", "كاين", "ديالكم", "ديالنا",
-        "donne", "envoie", "nomero", "numero", "give", "send", "have",
-        "num", "nimiro", "nemiro", "nmira"
+        "donne", "envoie", "nomero", "numero", "give", "send", "have"
     ]
     return any(kw in t for kw in direct_keywords)
 
@@ -343,7 +341,7 @@ def send_whatsapp(to, text):
         r = requests.post(API_URL, headers=headers, json=payload, timeout=15)
         logging.info(f"📲 [SEND] To: {to} | Status: {r.status_code}")
         if r.status_code not in (200, 201):
-            logging.error(f"❌ [SEND FAIL] Status: {r.status_code} | {r.text[:500]}")
+            logging.error(f"❌ [SEND FAIL] Status: {r.status_code} | META API ERROR: {r.text}")
         return r.status_code in (200, 201)
     except requests.Timeout:
         logging.error(f"⏱️ [SEND TIMEOUT] To: {to}")
@@ -358,8 +356,8 @@ def send_whatsapp_async(to, text):
 
 def send_admin_notification(phone, msg):
     """Send an urgent admin notification safely."""
+    # Note: Meta WhatsApp API requires the recipient to have initiated contact within 24 hours, or use a template message.
     return send_whatsapp(phone, msg)
-
 
 def notify_admin_media(sender, media_type):
     if sender == ADMIN_PHONE:
@@ -468,16 +466,13 @@ def handle_logic(sender, text):
     known = _get_known_leads()
     if sender not in known:
         _save_known_lead(sender)
-        # TASK 1: Ghost Lead Capture (Immediate Admin Alert)
-        threading.Thread(target=_safe_admin_notify, args=(ADMIN_PHONE, f"🚨 New Lead Clicked: {sender}\nرسالة: {raw_text}")).start()
-        
         vip_item, tier = find_number_in_catalog(raw_text)
         
         if vip_item:
             sessions[sender] = {"step": "initial_name", "data": {}, "first_msg": raw_text, "vip_item": vip_item}
             _touch_session(sessions[sender])
             save_json(SESSIONS_FILE, sessions)
-            return f"مرحبا بيك أخويا/أختي ✨\nسجلنا الرقم ديالك: {vip_item['number']} 🎯\nشنو الإسم الكريم باش نأكدو الطلب؟"
+            return pick_response("ask_name_with_number", number=vip_item["number"])
         else:
             sessions[sender] = {"step": "initial_name", "data": {}, "first_msg": raw_text}
             _touch_session(sessions[sender])
@@ -491,11 +486,10 @@ def handle_logic(sender, text):
     if is_direct_number_query(t_low) and len(digits_in_text) >= 9:
         vip_item, tier = find_number_in_catalog(raw_text)
         if vip_item:
-            sessions[sender] = {"step": "initial_name", "data": {}, "first_msg": raw_text, "vip_item": vip_item}
-            _touch_session(sessions[sender])
-            save_json(SESSIONS_FILE, sessions)
-            return f"مرحبا بيك أخويا/أختي ✨\nسجلنا الرقم ديالك: {vip_item['number']} 🎯\nشنو الإسم الكريم باش نأكدو الطلب؟"
+            # Number found — show immediate confirmation without starting form flow
+            return pick_response("number_available", number=vip_item["number"], price=vip_item.get("price", "N/A"))
         else:
+            # Number not found — show direct rejection
             return pick_response("number_not_found", catalog_url=CATALOG_URL)
 
     # — ORDER FORM FLOW —
@@ -506,37 +500,20 @@ def handle_logic(sender, text):
         if step == "initial_name":
             name = raw_text
             session["data"]["name"] = name
-            
+            # Send Admin Alert
+            first_msg = session.get("first_msg", "")
             vip_item = session.get("vip_item")
+            interest = f"🎯 مهتم بـ: *{vip_item['number']}*" if vip_item else "👀 استفسار عام"
+            alert = pick_response("admin_new_lead", sender=sender, message=f"{name}: {first_msg}"[:100], interest=interest, time=datetime.now().strftime('%H:%M:%S'))
+            threading.Thread(target=_safe_admin_notify, args=(ADMIN_PHONE, alert)).start()
             
             if vip_item:
-                # Finalize order directly (TASK 3)
-                city = "غير محدد"
-                vip_num = vip_item["number"]
-                orders = load_json(ORDERS_FILE, [])
-                order_id = f"ORD-{datetime.now().strftime('%d%m%Y-%H%M%S')}"
-                orders.append({
-                    "id": order_id, "sender": sender, "vip_number": vip_num,
-                    "price": vip_item.get("price", "N/A"),
-                    "tier": vip_item.get("tier", ""),
-                    "customer": {"name": name, "address": city, "phone": "whatsapp"},
-                    "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status": "pending"
-                })
-                save_json(ORDERS_FILE, orders)
-                
-                backup_summary = (
-                    "🗂️ NEW ORDER FINALIZED\n"
-                    f"sender={sender}\n"
-                    f"number={vip_num}\n"
-                    f"name={name}\n"
-                    f"price={vip_item.get('price', 'N/A')}"
-                )
-                threading.Thread(target=_safe_admin_notify, args=(ADMIN_PHONE, backup_summary)).start()
-                mark_number_sold(vip_num)
-                
-                sessions.pop(sender, None)
+                # If they already picked a number, move to city request directly
+                session["step"] = "address"
+                _touch_session(session)
+                sessions[sender] = session
                 save_json(SESSIONS_FILE, sessions)
-                return pick_response("order_complete", number=vip_num, name=name, city=city)
+                return pick_response("welcome_and_ask_city", name=name)
             else:
                 # No number picked yet, just welcome
                 sessions.pop(sender, None)

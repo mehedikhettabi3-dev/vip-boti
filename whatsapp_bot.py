@@ -371,16 +371,20 @@ def send_admin_notification(phone, msg):
     return send_whatsapp(phone, msg)
 
 def notify_admin_media(sender, media_type):
-    if sender == ADMIN_PHONE:
+    if sender == "212638388885":
         return
     media_label = "صورة/ملف" if media_type in ("image", "document", "audio", "video", "sticker") else "ميديا"
     alert = (
-        "⚠️ الكليان صيفط صورة/ملف! شوفها فـ Meta Dashboard.\n"
-        f"📞 من: {sender}\n"
-        f"📎 النوع: {media_type} ({media_label})\n"
-        f"🔗 https://wa.me/{sender}"
+        "⚠️ Media received from user\n"
+        f"From: {sender}\n"
+        f"Type: {media_type} ({media_label})\n"
+        f"Link: https://wa.me/{sender}"
     )
-    send_whatsapp_async(ADMIN_PHONE, alert)
+    try:
+        send_whatsapp("212638388885", alert)
+        logging.info(f"✅ [MEDIA ALERT SENT] From: {sender} | Type: {media_type}")
+    except Exception as e:
+        logging.error(f"❌ [MEDIA ALERT FAIL] From: {sender} | Error: {e}")
 
 # ============================================================
 # 🛠️  ADMIN COMMANDS
@@ -436,8 +440,12 @@ def handle_admin_command(sender, text):
         save_json(SESSIONS_FILE, {})
         return "♻️ تم تصفير الجلسات."
     if base == "!test":
-        send_whatsapp_async(ADMIN_PHONE, "🔔 اختبار — الإشعارات خدامة! ✅")
-        return "✅ تم إرسال اختبار."
+        try:
+            send_whatsapp("212638388885", "🔔 Test - Notifications Working! ✅")
+            return "✅ Test sent successfully."
+        except Exception as e:
+            logging.error(f"❌ [TEST NOTIFY FAIL] {e}")
+            return f"❌ Test failed: {e}"
     return "🛠️ أمر غير معروف. صيفط `!help`"
 
 # ============================================================
@@ -458,12 +466,15 @@ def handle_logic(sender, text):
     raw_text = text.strip()
 
     # — NOTIFY ADMIN (Immediate, failure-safe) —
-    if sender != ADMIN_PHONE:
-        logging.info(f"🔔 [NOTIFY ADMIN] New message from {sender}")
-        send_whatsapp_async(ADMIN_PHONE, f"📩 *ميساج جديد من {sender}:*\n\"{raw_text}\"")
+    if sender != "212638388885":
+        try:
+            send_whatsapp("212638388885", f"📩 New message from {sender}:\n{raw_text[:100]}")
+            logging.info(f"📩 [MESSAGE ALERT SENT] From: {sender}")
+        except Exception as e:
+            logging.error(f"❌ [MESSAGE ALERT FAIL] From: {sender} | Error: {e}")
 
     # — ADMIN: no lead/name flow; commands only (non-commands: clear stale session, no reply) —
-    if sender == ADMIN_PHONE:
+    if sender == "212638388885":
         if raw_text.startswith("!"):
             return handle_admin_command(sender, raw_text)
         sessions.pop(sender, None)
@@ -513,7 +524,11 @@ def handle_logic(sender, text):
             vip_item = session.get("vip_item")
             interest = f"🎯 مهتم بـ: *{vip_item['number']}*" if vip_item else "👀 استفسار عام"
             alert = pick_response("admin_new_lead", sender=sender, message=f"{name}: {first_msg}"[:100], interest=interest, time=datetime.now().strftime('%H:%M:%S'))
-            send_whatsapp_async(ADMIN_PHONE, alert)
+            try:
+                send_whatsapp("212638388885", alert)
+                logging.info(f"✅ [NAME ALERT SENT] From: {sender} | Name: {name}")
+            except Exception as e:
+                logging.error(f"❌ [NAME ALERT FAIL] From: {sender} | Error: {e}")
             
             if vip_item:
                 # If they already picked a number, move to city request directly
@@ -560,10 +575,20 @@ def handle_logic(sender, text):
                 f"city={city}\n"
                 f"time={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             )
-            send_whatsapp_async(ADMIN_PHONE, backup_summary)
+            try:
+                send_whatsapp("212638388885", backup_summary)
+                logging.info(f"✅ [ORDER BACKUP SENT] Order: {order_id} | From: {sender} | Number: {vip_num}")
+            except Exception as e:
+                logging.error(f"❌ [ORDER BACKUP FAIL] Order: {order_id} | Error: {e}")
+            
             mark_number_sold(vip_num)
             admin_msg = pick_response("admin_order", number=vip_num, name=name or "?", city=city or "?", phone="واتساب", sender=sender)
-            send_whatsapp_async(ADMIN_PHONE, admin_msg)
+            try:
+                send_whatsapp("212638388885", admin_msg)
+                logging.info(f"✅ [ORDER ALERT SENT] Order: {order_id} | From: {sender}")
+            except Exception as e:
+                logging.error(f"❌ [ORDER ALERT FAIL] Order: {order_id} | Error: {e}")
+            
             sessions.pop(sender, None)
             save_json(SESSIONS_FILE, sessions)
             return pick_response("order_complete", number=vip_num, name=name, city=city)
@@ -735,11 +760,14 @@ def webhook():
             if msg.get('type') == 'text':
                 body = msg['text']['body']
                 logging.info(f"💬 [MESSAGE] Text: {body[:100]}")
-                if sender != ADMIN_PHONE:
+                if sender != "212638388885":
                     known_leads = _get_known_leads()
                     if sender not in known_leads:
-                        # Fire and forget admin notification
-                        send_whatsapp_async("212638388885", f"🚨 New Lead Clicked: {sender}")
+                        try:
+                            send_whatsapp("212638388885", f"🚨 New Lead: {sender}")
+                            logging.info(f"✅ [WEBHOOK LEAD ALERT SENT] From: {sender}")
+                        except Exception as alert_err:
+                            logging.error(f"❌ [WEBHOOK LEAD ALERT FAIL] From: {sender} | Error: {alert_err}")
                 reply = handle_logic(sender, body)
                 if reply:  # Only send if there's a reply
                     send_whatsapp_async(sender, reply)

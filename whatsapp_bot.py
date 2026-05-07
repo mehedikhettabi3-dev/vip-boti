@@ -31,23 +31,7 @@ CFG = get_config()
 def _digits_only(s):
     return "".join(filter(str.isdigit, str(s or "")))
 
-def normalize_whatsapp_phone(raw):
-    """Digits-only id for Cloud API (Morocco: 212…)."""
-    d = _digits_only(raw)
-    if not d:
-        return ""
-    if d.startswith("212"):
-        return d
-    if d.startswith("0") and len(d) >= 10:
-        return "212" + d[1:]
-    if len(d) == 9:
-        return "212" + d
-    return d
-
-ACCESS_TOKEN    = os.environ.get("ACCESS_TOKEN") or CFG.get("ACCESS_TOKEN", "")
-PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID") or CFG.get("PHONE_NUMBER_ID", "")
-VERIFY_TOKEN    = os.environ.get("VERIFY_TOKEN") or CFG.get("VERIFY_TOKEN", "vip_bot_2026")
-ADMIN_PHONE     = normalize_whatsapp_phone(os.environ.get("ADMIN_PHONE") or CFG.get("ADMIN_PHONE", "212638388885"))  # Fallback to hardcoded admin phone
+ADMIN_PHONE     = "212638388885"  # HARDCODED PRO LEVEL
 _default_catalog = "https://vip-boti.onrender.com"
 CATALOG_URL     = (os.environ.get("CATALOG_URL") or CFG.get("CATALOG_URL") or _default_catalog).rstrip("/")
 DASHBOARD_USER  = os.environ.get("DASHBOARD_USER") or CFG.get("DASHBOARD_USER", "admin")
@@ -457,102 +441,79 @@ def handle_admin_command(sender, text):
 # 🧠  MAIN LOGIC — 100% responses.json, ZERO AI
 # ============================================================
 def _get_known_leads():
-    return set(load_json(LEADS_FILE, []))
+    leads = load_json(LEADS_FILE, {})
+    if isinstance(leads, list):
+        leads = {str(k): {"name": ""} for k in leads}
+        save_json(LEADS_FILE, leads)
+    return leads
 
 @with_lock
-def _save_known_lead(sender):
+def _save_known_lead(sender, name=""):
     leads = _get_known_leads()
-    leads.add(sender)
-    save_json(LEADS_FILE, list(leads))
+    if sender not in leads: leads[sender] = {"name": name}
+    elif name: leads[sender]["name"] = name
+    save_json(LEADS_FILE, leads)
 
 @with_lock
 def handle_logic(sender, text):
     sessions = load_json(SESSIONS_FILE, {})
     raw_text = text.strip()
 
-    # — ADMIN: no lead/name flow; commands only (non-commands: clear stale session, no reply) —
-    if sender == "212638388885":
-        if raw_text.startswith("!"):
-            return handle_admin_command(sender, raw_text)
-        sessions.pop(sender, None)
-        save_json(SESSIONS_FILE, sessions)
+    # ADMIN COMMANDS
+    if sender == ADMIN_PHONE:
+        if raw_text.startswith("!"): return "🛠️ Admin command received: " + raw_text
         return None
 
-    # — NEW LEAD / NAME REQUEST (first contact) —
-    known = _get_known_leads()
-    if sender not in known:
+    leads = _get_known_leads()
+    is_new_lead = sender not in leads
+
+    # GATEKEEPER: prevent name loop
+    if not is_new_lead and leads[sender].get("name"):
+        if sender in sessions and sessions[sender].get("step") == "initial_name":
+            sessions.pop(sender, None)
+            save_json(SESSIONS_FILE, sessions)
+
+    # NEW LEAD FLOW
+    if is_new_lead:
         _save_known_lead(sender)
-        vip_item, tier = find_number_in_catalog(raw_text)
-        
-        if vip_item:
-            sessions[sender] = {"step": "initial_name", "data": {}, "first_msg": raw_text, "vip_item": vip_item}
-            _touch_session(sessions[sender])
-            save_json(SESSIONS_FILE, sessions)
-            return pick_response("ask_name_with_number", number=vip_item["number"])
-        else:
-            sessions[sender] = {"step": "initial_name", "data": {}, "first_msg": raw_text}
-            _touch_session(sessions[sender])
-            save_json(SESSIONS_FILE, sessions)
-            return pick_response("ask_name_initial")
+        vip_item, _ = find_number_in_catalog(raw_text)
+        sessions[sender] = {"step": "initial_name", "first_msg": raw_text}
+        if vip_item: sessions[sender]["vip_item"] = vip_item
+        _touch_session(sessions[sender])
+        save_json(SESSIONS_FILE, sessions)
+        return pick_response("ask_name_with_number", number=vip_item["number"]) if vip_item else pick_response("ask_name_initial")
 
-    # — IMMEDIATE NUMBER VERIFICATION (before sessions/forms) —
-    # Check if user is asking about a specific number (رقم، عندك، كاين، brit, etc)
+    # IMMEDIATE NUMBER VERIFICATION
     t_low = raw_text.lower()
-    digits_in_text = "".join(filter(str.isdigit, t_low))
-    if is_direct_number_query(t_low) and len(digits_in_text) >= 9:
-        vip_item, tier = find_number_in_catalog(raw_text)
-        if vip_item:
-            # Number found — show immediate confirmation without starting form flow
-            return pick_response("number_available", number=vip_item["number"], price=vip_item.get("price", "N/A"))
-        else:
-            # Number not found — show direct rejection
-            return pick_response("number_not_found", catalog_url=CATALOG_URL)
+    if is_direct_number_query(t_low) and len("".join(filter(str.isdigit, t_low))) >= 9:
+        vip_item, _ = find_number_in_catalog(raw_text)
+        if vip_item: return pick_response("number_available", number=vip_item["number"], price=vip_item.get("price", "N/A"))
+        else: return pick_response("number_not_found", catalog_url=CATALOG_URL)
 
-    # — STATE PROTECTION: if name already stored, bypass repeated name request and show catalog —
+    # SESSION HANDLING
     if sender in sessions and "step" in sessions[sender]:
         session = sessions[sender]
-        if session.get("step") == "initial_name" and session.get("data", {}).get("name"):
-            catalog_text = format_catalog_message()
-            print(f"[SYSTEM] Name exists in session for {sender}, bypassing name request")
-            return pick_response("show_catalog", catalog=catalog_text)
         step = session["step"]
 
         if step == "initial_name":
-
             name = raw_text
-            session["data"]["name"] = name
-            # Persist name immediately and verify
-            save_json(SESSIONS_FILE, sessions)
-            saved_sessions = load_json(SESSIONS_FILE, {})
-            if saved_sessions.get(sender, {}).get("data", {}).get("name") == name:
-                print(f"[SYSTEM] Session saved for {sender}")
-            else:
-                logging.error(f"❌ [SESSION SAVE FAIL] Could not verify name persistence for {sender}")
-
-            # Send Admin Alert
-            first_msg = session.get("first_msg", "")
+            # 1. Save name permanently in leads
+            _save_known_lead(sender, name)
+            print(f"[SYSTEM] Name '{name}' saved for {sender}")
             vip_item = session.get("vip_item")
-            interest = f"🎯 مهتم بـ: *{vip_item['number']}*" if vip_item else "👀 استفسار عام"
-            alert = pick_response("admin_new_lead", sender=sender, message=f"{name}: {first_msg}"[:100], interest=interest, time=datetime.now().strftime('%H:%M:%S'))
-            try:
-                send_whatsapp("212638388885", alert)
-                print("[SYSTEM] Notification sent to 212638388885")
-                logging.info(f"✅ [NAME ALERT SENT] From: {sender} | Name: {name}")
-            except Exception as e:
-                logging.error(f"❌ [NAME ALERT FAIL] From: {sender} | Error: {e}")
-            
             if vip_item:
-                # If they already picked a number, move to city request directly
                 session["step"] = "address"
+                session["data"] = {"name": name}
                 _touch_session(session)
                 sessions[sender] = session
                 save_json(SESSIONS_FILE, sessions)
                 return pick_response("welcome_and_ask_city", name=name)
             else:
-                # No number picked yet, just welcome
+                # Clear session so they don't loop, jump straight to catalog
                 sessions.pop(sender, None)
                 save_json(SESSIONS_FILE, sessions)
-                return pick_response("welcome_with_name", name=name)
+                catalog_text = format_catalog_message()
+                return pick_response("show_catalog", catalog=catalog_text)
 
         if step == "address":
             city = raw_text
@@ -561,97 +522,33 @@ def handle_logic(sender, text):
                 sessions.pop(sender, None)
                 save_json(SESSIONS_FILE, sessions)
                 return pick_response("unknown")
-            od = session.get("data", {})
-            name = od.get("name", "")
+            name = leads.get(sender, {}).get("name", "?")
             vip_num = vip_item["number"]
-            od["address"] = city
             orders = load_json(ORDERS_FILE, [])
             order_id = f"ORD-{datetime.now().strftime('%d%m%Y-%H%M%S')}"
             orders.append({
                 "id": order_id, "sender": sender, "vip_number": vip_num,
                 "price": vip_item.get("price", "N/A"),
-                "tier": vip_item.get("tier", ""),
                 "customer": {"name": name, "address": city, "phone": "whatsapp"},
                 "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status": "pending"
             })
             save_json(ORDERS_FILE, orders)
-            backup_summary = (
-                "🗂️ BACKUP ORDER RAW\n"
-                f"id={order_id}\n"
-                f"sender={sender}\n"
-                f"number={vip_num}\n"
-                f"price={vip_item.get('price', 'N/A')}\n"
-                f"tier={vip_item.get('tier', '')}\n"
-                f"name={name}\n"
-                f"city={city}\n"
-                f"time={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            )
-            try:
-                send_whatsapp("212638388885", backup_summary)
-                logging.info(f"✅ [ORDER BACKUP SENT] Order: {order_id} | From: {sender} | Number: {vip_num}")
-            except Exception as e:
-                logging.error(f"❌ [ORDER BACKUP FAIL] Order: {order_id} | Error: {e}")
-            
             mark_number_sold(vip_num)
-            admin_msg = pick_response("admin_order", number=vip_num, name=name or "?", city=city or "?", phone="واتساب", sender=sender)
-            try:
-                send_whatsapp("212638388885", admin_msg)
-                logging.info(f"✅ [ORDER ALERT SENT] Order: {order_id} | From: {sender}")
-            except Exception as e:
-                logging.error(f"❌ [ORDER ALERT FAIL] Order: {order_id} | Error: {e}")
-            
+            admin_msg = pick_response("admin_order", number=vip_num, name=name, city=city, phone="واتساب", sender=sender)
+            send_whatsapp_async(ADMIN_PHONE, admin_msg)
             sessions.pop(sender, None)
             save_json(SESSIONS_FILE, sessions)
             return pick_response("order_complete", number=vip_num, name=name, city=city)
 
-        if step == "confirm":
-            t_low = raw_text.lower().strip()
-            yes_w = ["نعم","aywa","oui","yes","واه","اه","ايوا","yep","ok","okay","بغيت","هيا","kayen","iyeh","wah"]
-            no_w = ["لا","non","no","nope","ma bghitch","ما بغيتش","la"]
-            vip = session["vip_item"]
-            if any(w in t_low for w in yes_w):
-                session["step"] = "initial_name"
-                session["data"] = {}
-                session["vip_item"] = vip
-                _touch_session(session)
-                sessions[sender] = session
-                save_json(SESSIONS_FILE, sessions)
-                return pick_response("confirm_yes", number=vip["number"])
-            elif any(w in t_low for w in no_w):
-                sessions.pop(sender, None)
-                save_json(SESSIONS_FILE, sessions)
-                return pick_response("confirm_no")
-            else:
-                return pick_response("confirm_unclear", number=vip["number"], price=vip.get("price", "200 DH"))
-
-    # — CHECK FOR VIP NUMBER —
-    vip_item, tier = find_number_in_catalog(raw_text)
-    if vip_item:
-        sessions[sender] = {"step": "confirm", "vip_item": vip_item, "data": {}}
-        _touch_session(sessions[sender])
-        save_json(SESSIONS_FILE, sessions)
-        return pick_response("number_available", number=vip_item["number"], price=vip_item.get("price", "N/A"))
-
-    # — INTENT DETECTION —
+    # INTENT DETECTION
     intent = detect_intent(raw_text)
-
-    if intent == "show_catalog":
-        catalog_text = format_catalog_message()
-        return pick_response("show_catalog", catalog=catalog_text)
-
-    if intent == "number_inquiry":
-        return pick_response("number_not_found")
-
-    if intent == "contact_request":
-        return pick_response("contact_request", catalog_url=CATALOG_URL)
-
-    if intent in ("greeting", "price_inquiry", "help", "cancel", "thanks", "negotiation", "delivery_question", "trust_question", "unknown"):
-        if intent == "cancel" and sender in sessions:
-            sessions.pop(sender, None)
-            save_json(SESSIONS_FILE, sessions)
-        return pick_response(intent)
-
-    return pick_response("unknown")
+    if intent == "show_catalog": return pick_response("show_catalog", catalog=format_catalog_message())
+    if intent == "number_inquiry": return pick_response("number_not_found")
+    if intent == "contact_request": return pick_response("contact_request", catalog_url=CATALOG_URL)
+    if intent == "cancel" and sender in sessions:
+        sessions.pop(sender, None)
+        save_json(SESSIONS_FILE, sessions)
+    return pick_response(intent)
 
 # ============================================================
 # 🌐  ROUTES
@@ -766,30 +663,29 @@ def webhook():
                         processed_messages.popitem(last=False)
             
             sender = "".join(filter(str.isdigit, msg['from']))
-            send_admin_notification("212638388885", f"🚨 Webhook message received from {sender}")
-            logging.info("[SYSTEM] Notification sent to 212638388885")
-            logging.info(f"📩 [RECEIVE] From: {sender} | Message ID: {msg_id}")
+            
+            # --- WEBHOOK FIRST ALERT (FIRE & FORGET) ---
+            if sender != ADMIN_PHONE:
+                if msg.get('type') == 'text':
+                    body_preview = msg['text']['body'][:100]
+                    alert_msg = f"🚨 رسالة جديدة من: {sender}\nالرسالة: {body_preview}\nتواصل: https://wa.me/{sender}"
+                    send_whatsapp_async(ADMIN_PHONE, alert_msg)
+                    print(f"[SYSTEM] Urgent Lead Alert sent to {ADMIN_PHONE} for {sender}")
+                else:
+                    alert_msg = f"🚨 ميديا جديدة من: {sender}\nالنوع: {msg.get('type')}\nتواصل: https://wa.me/{sender}"
+                    send_whatsapp_async(ADMIN_PHONE, alert_msg)
+
+            with shared_lock:
+                if msg_id in processed_messages: return "ok", 200
+                processed_messages[msg_id] = True
+                if len(processed_messages) > MAX_PROCESSED_MESSAGES: processed_messages.popitem(last=False)
             
             if msg.get('type') == 'text':
-                body = msg['text']['body']
-                logging.info(f"💬 [MESSAGE] Text: {body[:100]}")
-                if sender != "212638388885":
-                    known_leads = _get_known_leads()
-                    if sender not in known_leads:
-                        try:
-                            send_whatsapp("212638388885", f"🚨 New Lead: {sender}")
-                            logging.info(f"✅ [WEBHOOK LEAD ALERT SENT] From: {sender}")
-                        except Exception as alert_err:
-                            logging.error(f"❌ [WEBHOOK LEAD ALERT FAIL] From: {sender} | Error: {alert_err}")
-                reply = handle_logic(sender, body)
-                if reply:  # Only send if there's a reply
-                    send_whatsapp_async(sender, reply)
+                reply = handle_logic(sender, msg['text']['body'])
+                if reply: send_whatsapp_async(sender, reply)
             elif msg.get('type') in ('image','document','audio','video','sticker'):
-                logging.info(f"📎 [MEDIA] Type: {msg.get('type')}")
-                notify_admin_media(sender, msg.get('type'))
                 reply = pick_response("media_received")
-                if reply:
-                    send_whatsapp_async(sender, reply)
+                if reply: send_whatsapp_async(sender, reply)
                     
         return "ok", 200
     except Exception as e:
@@ -836,6 +732,54 @@ def api_chat():
         reply = handle_logic(sender, user_text)
         return jsonify({"response": reply or ""})
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ============================================================
+# 👁️  PAGE VISIT TRACKER — Notify admin on every new visitor
+# ============================================================
+_visit_throttle = {}  # ip -> last_notify_timestamp
+VISIT_THROTTLE_SECS = 300  # 5 minutes per IP to avoid spam
+
+@app.route("/api/page-visit", methods=["POST"])
+def api_page_visit():
+    try:
+        data = request.get_json(force=True) or {}
+        ip_address = request.environ.get("HTTP_X_FORWARDED_FOR", request.remote_addr)
+        # Take first IP if comma-separated (proxy chain)
+        ip_clean = ip_address.split(",")[0].strip() if ip_address else "unknown"
+        user_agent = request.headers.get("User-Agent", "N/A")
+        referrer   = data.get("referrer", request.referrer or "direct")
+        page       = data.get("page", "/")
+        timestamp  = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Throttle: only notify once per IP per VISIT_THROTTLE_SECS
+        now = time.time()
+        last = _visit_throttle.get(ip_clean, 0)
+        if now - last < VISIT_THROTTLE_SECS:
+            return jsonify({"ok": True, "throttled": True}), 200
+
+        _visit_throttle[ip_clean] = now
+        # Prune old entries to keep dict small
+        if len(_visit_throttle) > 500:
+            cutoff = now - VISIT_THROTTLE_SECS
+            for k in [k for k, v in _visit_throttle.items() if v < cutoff]:
+                _visit_throttle.pop(k, None)
+
+        alert = (
+            f"👁️ *زيارة جديدة للموقع!*\n"
+            f"🌐 IP: {ip_clean}\n"
+            f"📄 الصفحة: {page}\n"
+            f"🔗 المصدر: {referrer}\n"
+            f"📱 الجهاز: {user_agent[:80]}\n"
+            f"⏰ الوقت: {timestamp}"
+        )
+
+        logging.info(f"👁️ [PAGE VISIT] IP: {ip_clean} | Page: {page}")
+        send_whatsapp_async(ADMIN_PHONE, alert)
+
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        logging.error(f"❌ [PAGE VISIT ERROR] {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/whatsapp-click", methods=["POST"])

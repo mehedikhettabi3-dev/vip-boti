@@ -326,6 +326,8 @@ def detect_intent(text):
     for kw in HELP_KW:
         if kw in t: return "help"
 
+    return "unknown"
+
 # ============================================================
 def send_whatsapp(to, text):
     """Send WhatsApp message with timeout and error handling"""
@@ -462,9 +464,9 @@ def handle_logic(sender, text):
     sessions = load_json(SESSIONS_FILE, {})
     raw_text = text.strip()
 
-    # ADMIN COMMANDS
+    # ADMIN COMMANDS — Execute properly
     if sender == ADMIN_PHONE:
-        if raw_text.startswith("!"): return "🛠️ Admin command received: " + raw_text
+        if raw_text.startswith("!"): return handle_admin_command(sender, raw_text)
         return None
 
     leads = _get_known_leads()

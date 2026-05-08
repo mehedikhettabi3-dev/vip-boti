@@ -64,6 +64,16 @@
       "number": "06 00 20 50 12",
       "price": "200 DH",
       "status": "available"
+    },
+    {
+      "number": "06 01 60 00 03",
+      "price": "200 DH",
+      "status": "available"
+    },
+    {
+      "number": "07 04 25 55 57",
+      "price": "200 DH",
+      "status": "available"
     }
   ],
   "Gold": [

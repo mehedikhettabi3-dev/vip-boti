@@ -34,7 +34,7 @@ PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID") or CFG.get("PHONE_NUMBER_ID"
 def _digits_only(s):
     return "".join(filter(str.isdigit, str(s or "")))
 
-ADMIN_PHONE     = os.environ.get("ADMIN_PHONE") or CFG.get("ADMIN_PHONE", "212638388885")
+ADMIN_PHONE     = os.environ.get("ADMIN_PHONE") or CFG.get("ADMIN_PHONE", "212778375026")
 _default_catalog = "https://vip-boti.onrender.com"
 CATALOG_URL     = (os.environ.get("CATALOG_URL") or CFG.get("CATALOG_URL") or _default_catalog).rstrip("/")
 DASHBOARD_USER  = os.environ.get("DASHBOARD_USER") or CFG.get("DASHBOARD_USER", "admin")

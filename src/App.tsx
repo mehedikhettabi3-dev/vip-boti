@@ -13,6 +13,7 @@ type Catalog = Record<string, VipNumber[]>
 
 const API_URL = 'https://vip-boti.onrender.com/api/full_catalog'
 const CLICK_TRACKING_URL = 'https://vip-boti.onrender.com/api/whatsapp-click'
+const VISIT_TRACKING_URL = 'https://vip-boti.onrender.com/api/page-visit'
 const HERO_NUMBER = '07 03 31 33 13'
 const WHATSAPP_BASE = 'https://wa.me/212638388885?text='
 const BRAND_NAME = 'Inwi VIP Number'
@@ -217,6 +218,20 @@ function App() {
       window.clearTimeout(showTimer)
       window.clearTimeout(hideTimer)
     }
+  }, [])
+
+  // 👁️ Page Visit Tracker — fires once per browser session
+  useEffect(() => {
+    if (sessionStorage.getItem('vip_visit_tracked')) return
+    sessionStorage.setItem('vip_visit_tracked', '1')
+    fetch(VISIT_TRACKING_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        page: window.location.pathname || '/',
+        referrer: document.referrer || 'direct'
+      })
+    }).catch(() => {/* silent fail — never block the UI */})
   }, [])
 
   useEffect(() => {

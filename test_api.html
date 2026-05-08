@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>WhatsApp Test</title>
+</head>
+<body style="font-family: monospace; padding: 20px;">
+    <h1 id="status">⏳ Sending WhatsApp Message...</h1>
+    <pre id="result" style="background: #f0f0f0; padding: 10px; font-size: 16px;"></pre>
+    
+    <script>
+        const url = 'https://graph.facebook.com/v19.0/1123304554190295/messages';
+        const token = 'EAARvYecnWT4BRT5JEjGV6nQvEzuS1mKrnsLRZClBHsAZCj109zBKN3tkv1m6MfvoD61kXyQhgMElWfrvqudWtJ4IaJfdVnBNEiCxcVG9qC0ZAOuDAS3Kpt4hWeZADLfJlbYGu2IUsO78vYnw3CnOgt5gyubSvhTgGXqE2NNasOJ2AphtsPyyvNlNjCZCIXYsE36quJgs707tC1ZBt3dj1nbrIDIrnlPURTZBobrXq9A2TRhSYtVIhX6zUVO4AkkTZCzZAuQJQSaoCXWfH2NY7ZBush';
+        const payload = {
+            "messaging_product": "whatsapp",
+            "to": "212778375026",
+            "type": "text",
+            "text": {
+                "body": "🚀 تم إرسال الرسالة من الذكاء الاصطناعي مباشرة دون أي أعذار! البوت يعمل 100%."
+            }
+        };
+
+        fetch(url, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.messages && data.messages.length > 0) {
+                document.getElementById('status').innerText = '✅ SUCCESS! Message Sent.';
+                document.getElementById('status').style.color = 'green';
+            } else {
+                document.getElementById('status').innerText = '❌ ERROR! Failed to send.';
+                document.getElementById('status').style.color = 'red';
+            }
+            document.getElementById('result').innerText = JSON.stringify(data, null, 2);
+        })
+        .catch(err => {
+            document.getElementById('status').innerText = '❌ EXCEPTION!';
+            document.getElementById('status').style.color = 'red';
+            document.getElementById('result').innerText = err.toString();
+        });
+    </script>
+</body>
+</html>

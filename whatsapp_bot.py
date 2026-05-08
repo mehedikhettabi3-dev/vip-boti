@@ -28,10 +28,13 @@ def get_config():
 
 CFG = get_config()
 
+ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN") or CFG.get("ACCESS_TOKEN", "")
+PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID") or CFG.get("PHONE_NUMBER_ID", "")
+
 def _digits_only(s):
     return "".join(filter(str.isdigit, str(s or "")))
 
-ADMIN_PHONE     = "212638388885"  # HARDCODED PRO LEVEL
+ADMIN_PHONE     = os.environ.get("ADMIN_PHONE") or CFG.get("ADMIN_PHONE", "212638388885")
 _default_catalog = "https://vip-boti.onrender.com"
 CATALOG_URL     = (os.environ.get("CATALOG_URL") or CFG.get("CATALOG_URL") or _default_catalog).rstrip("/")
 DASHBOARD_USER  = os.environ.get("DASHBOARD_USER") or CFG.get("DASHBOARD_USER", "admin")
@@ -352,15 +355,15 @@ def send_whatsapp_async(to, text):
 def send_admin_notification(phone, msg):
     """Send an urgent admin notification safely."""
     try:
-        send_whatsapp("212638388885", msg)
-        print("[SYSTEM] Notification sent to 212638388885")
-        logging.info("✅ [ADMIN NOTIFICATION DISPATCHED] 212638388885")
+        send_whatsapp_async(ADMIN_PHONE, msg)
+        print(f"[SYSTEM] Notification sent to {ADMIN_PHONE}")
+        logging.info(f"✅ [ADMIN NOTIFICATION DISPATCHED] {ADMIN_PHONE}")
     except Exception as e:
-        logging.error(f"❌ [ADMIN NOTIFICATION FAIL] 212638388885 | Error: {e}")
+        logging.error(f"❌ [ADMIN NOTIFICATION FAIL] {ADMIN_PHONE} | Error: {e}")
     return None
 
 def notify_admin_media(sender, media_type):
-    if sender == "212638388885":
+    if sender == ADMIN_PHONE:
         return
     media_label = "صورة/ملف" if media_type in ("image", "document", "audio", "video", "sticker") else "ميديا"
     alert = (
@@ -370,10 +373,10 @@ def notify_admin_media(sender, media_type):
         f"Link: https://wa.me/{sender}"
     )
     try:
-        send_whatsapp("212638388885", alert)
-        logging.info(f"✅ [MEDIA ALERT SENT] From: {sender} | Type: {media_type}")
+        send_whatsapp_async(ADMIN_PHONE, alert)
+        logging.info(f"✅ [MEDIA ALERT SENT] To: {ADMIN_PHONE} | From: {sender} | Type: {media_type}")
     except Exception as e:
-        logging.error(f"❌ [MEDIA ALERT FAIL] From: {sender} | Error: {e}")
+        logging.error(f"❌ [MEDIA ALERT FAIL] To: {ADMIN_PHONE} | From: {sender} | Error: {e}")
 
 # ============================================================
 # 🛠️  ADMIN COMMANDS
@@ -430,8 +433,8 @@ def handle_admin_command(sender, text):
         return "♻️ تم تصفير الجلسات."
     if base == "!test":
         try:
-            send_whatsapp("212638388885", "🔔 Test - Notifications Working! ✅")
-            return "✅ Test sent successfully."
+            send_whatsapp_async(ADMIN_PHONE, "🔔 Test - Notifications Working! ✅")
+            return f"✅ Test notification sent to {ADMIN_PHONE}."
         except Exception as e:
             logging.error(f"❌ [TEST NOTIFY FAIL] {e}")
             return f"❌ Test failed: {e}"
@@ -707,8 +710,8 @@ def api_register():
         
         # Save to known leads
         leads = _get_known_leads()
-        leads.add(phone)
-        save_json(LEADS_FILE, list(leads))
+        leads[phone] = {"name": name}
+        save_json(LEADS_FILE, leads)
         
         # Log registration
         logging.info(f"✅ [REGISTER] Phone: {phone} | Name: {name}")
@@ -775,7 +778,18 @@ def api_page_visit():
         )
 
         logging.info(f"👁️ [PAGE VISIT] IP: {ip_clean} | Page: {page}")
-        send_whatsapp_async(ADMIN_PHONE, alert)
+        try:
+            future = send_whatsapp_async(ADMIN_PHONE, alert)
+            # Log if there's an error
+            def _log_result(f):
+                try:
+                    result = f.result()
+                    logging.info(f"✅ [PAGE VISIT NOTIFICATION] Sent to {ADMIN_PHONE}: {result}")
+                except Exception as e:
+                    logging.error(f"❌ [PAGE VISIT NOTIFICATION FAILED] {e}")
+            future.add_done_callback(_log_result)
+        except Exception as e:
+            logging.error(f"❌ [PAGE VISIT] Failed to send notification: {e}")
 
         return jsonify({"ok": True}), 200
     except Exception as e:
@@ -806,18 +820,18 @@ def api_whatsapp_click():
             f"🌐 IP: {ip_address}\n"
             f"⏰ الوقت: {timestamp}\n"
             f"📊 الجهاز: {user_agent[:60]}\n\n"
-            f"👉 اضغط للتواصل: https://wa.me/212638388885"
+            f"👉 اضغط للتواصل: https://wa.me/{ADMIN_PHONE}"
         )
 
-        # Send notification directly to hardcoded admin phone (212638388885) with error logging
+        # Send notification asynchronously to admin
         try:
-            send_whatsapp("212638388885", admin_alert)
+            send_whatsapp_async(ADMIN_PHONE, admin_alert)
         except Exception as notify_err:
             logging.error(f"❌ [ADMIN NOTIFY FAIL] Could not send notification: {notify_err}")
         
-        logging.info(f"✅ [WHATSAPP CLICK] Number: {number} | Tier: {tier} | Price: {price} | IP: {ip_address} | Notification sent to admin")
+        logging.info(f"✅ [WHATSAPP CLICK] Number: {number} | Tier: {tier} | Price: {price} | IP: {ip_address} | Notification sent to {ADMIN_PHONE}")
 
-        return jsonify({"ok": True, "redirect": f"https://wa.me/212638388885?text={quote(f'Salam, bghit nreservi had nmra VIP: {number} - {price} - Tier: {tier}')}"})
+        return jsonify({"ok": True, "redirect": f"https://wa.me/{ADMIN_PHONE}?text={quote(f'Salam, bghit nreservi had nmra VIP: {number} - {price} - Tier: {tier}')}"})
     except Exception as e:
         logging.error(f"❌ [WHATSAPP CLICK ERROR] {e}")
         return jsonify({"error": str(e)}), 500

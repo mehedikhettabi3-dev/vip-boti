@@ -34,7 +34,7 @@ PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID") or CFG.get("PHONE_NUMBER_ID"
 def _digits_only(s):
     return "".join(filter(str.isdigit, str(s or "")))
 
-ADMIN_PHONE     = os.environ.get("ADMIN_PHONE") or CFG.get("ADMIN_PHONE", "212778375026")
+ADMIN_PHONE     = "".join(filter(str.isdigit, str(os.environ.get("ADMIN_PHONE") or CFG.get("ADMIN_PHONE", "212778375026"))))
 _default_catalog = "https://vip-boti.onrender.com"
 CATALOG_URL     = (os.environ.get("CATALOG_URL") or CFG.get("CATALOG_URL") or _default_catalog).rstrip("/")
 DASHBOARD_USER  = os.environ.get("DASHBOARD_USER") or CFG.get("DASHBOARD_USER", "admin")
@@ -336,8 +336,9 @@ def send_whatsapp(to, text):
         return False
     
     headers = {"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"}
-    payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text[:4096]}}  # WhatsApp max 4096 chars
+    payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text[:4096]}}
     try:
+        logging.info(f"📤 [ATTEMPT] Sending to {to}...")
         r = requests.post(API_URL, headers=headers, json=payload, timeout=15)
         logging.info(f"📲 [SEND] To: {to} | Status: {r.status_code}")
         if r.status_code not in (200, 201):
@@ -471,6 +472,17 @@ def handle_logic(sender, text):
 
     leads = _get_known_leads()
     is_new_lead = sender not in leads
+
+    # --- ADMIN ALERT FOR NEW LEAD ---
+    if is_new_lead and sender != ADMIN_PHONE:
+        _save_known_lead(sender)
+        interest = "👀 استفسار عام"
+        vip_item, _ = find_number_in_catalog(raw_text)
+        if vip_item: interest = f"🎯 مهتم بـ: *{vip_item['number']}*"
+        
+        alert = pick_response("admin_new_lead", sender=sender, message=raw_text[:100], interest=interest, time=datetime.now().strftime('%H:%M:%S'))
+        send_whatsapp_async(ADMIN_PHONE, alert)
+        logging.info(f"🔔 [ADMIN ALERT] New Lead {sender} notified to {ADMIN_PHONE}")
 
     # GATEKEEPER: prevent name loop
     if not is_new_lead and leads[sender].get("name"):

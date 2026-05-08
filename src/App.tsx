@@ -16,7 +16,7 @@ const CLICK_TRACKING_URL = 'https://vip-boti.onrender.com/api/whatsapp-click'
 const VISIT_TRACKING_URL = 'https://vip-boti.onrender.com/api/page-visit'
 const HERO_NUMBER = '07 03 31 33 13'
 const WHATSAPP_BASE = 'https://wa.me/212778375026?text='
-const BRAND_NAME = 'Inwi VIP Number'
+const BRAND_NAME = 'Nadiya Ratkalaf'
 
 const trackWhatsAppClick = async (number: string, price: string, tier: string) => {
   try {
@@ -383,15 +383,15 @@ function App() {
       <motion.header initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="relative z-10 mx-auto flex max-w-7xl items-center justify-between px-5 py-6 sm:px-8">
         <div className="flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-300/40 bg-gradient-to-br from-amber-100 via-yellow-500 to-amber-800 text-black shadow-[0_0_40px_rgba(245,158,11,0.28)]"><Zap size={24} /></div>
-          <div><p className="text-lg font-black tracking-[0.18em] text-purple-200">INWI VIP NUMBER</p><p className="text-xs uppercase tracking-[0.35em] text-purple-300/60">سوق الأرقام الفاخرة</p></div>
+          <div><p className="text-lg font-black tracking-[0.18em] text-purple-200">NADIYA RATKALAF</p><p className="text-xs uppercase tracking-[0.35em] text-purple-300/60">سوق الأرقام الفاخرة</p></div>
         </div>
         <button onClick={scrollToCollection} className="hidden rounded-full border border-amber-300/30 bg-black/30 px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.2em] text-amber-100 transition hover:bg-amber-300 hover:text-black sm:block">View Catalog</button>
       </motion.header>
       <section className="relative z-10 mx-auto grid max-w-7xl items-center gap-14 px-5 pb-16 pt-14 sm:px-8 lg:grid-cols-[1.05fr_0.95fr] lg:pb-24 lg:pt-20">
         <motion.div initial={{ opacity: 0, y: 36 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }}>
           <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-amber-300/25 bg-amber-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.28em] text-amber-100"><Sparkles size={15} />{catalogSource === 'live' ? 'Live VIP Catalog • Auto Refresh' : 'VIP Catalog • Safe Mode'}</div>
-          <h1 className="max-w-4xl text-5xl font-black leading-[0.95] tracking-[-0.06em] text-white sm:text-7xl lg:text-8xl"><span className="bg-gradient-to-r from-purple-200 via-fuchsia-400 to-amber-300 bg-clip-text text-transparent">INWI VIP NUMBER</span></h1>
-          <p className="mt-7 max-w-2xl text-lg leading-8 text-stone-300 sm:text-xl">A premium Moroccan marketplace for Inwi VIP phone numbers. Purple luxury style with auto-refresh and instant WhatsApp ordering.</p>
+          <h1 className="max-w-4xl text-5xl font-black leading-[0.95] tracking-[-0.06em] text-white sm:text-7xl lg:text-8xl"><span className="bg-gradient-to-r from-purple-200 via-fuchsia-400 to-amber-300 bg-clip-text text-transparent">NADIYA RATKALAF</span></h1>
+          <p className="mt-7 max-w-2xl text-lg leading-8 text-stone-300 sm:text-xl">A premium Moroccan marketplace for Nadiya Ratkalaf VIP phone numbers. Purple luxury style with auto-refresh and instant WhatsApp ordering.</p>
           <div className="mt-9 flex flex-col gap-4 sm:flex-row"><button onClick={scrollToCollection} className="rounded-full bg-gradient-to-r from-amber-200 via-yellow-500 to-amber-700 px-8 py-4 text-sm font-black uppercase tracking-[0.22em] text-black shadow-[0_20px_80px_rgba(245,158,11,0.25)] transition hover:scale-[1.02]">Browse Numbers</button></div>
         </motion.div>
         <motion.div style={{ rotateX, rotateY, transformPerspective: 900 }} className="relative mx-auto w-full max-w-lg [transform-style:preserve-3d]">
@@ -428,7 +428,7 @@ function App() {
         </div>
       </section>
       <footer className="relative z-10 border-t border-amber-100/10 px-5 py-10 text-center text-sm text-stone-500 sm:px-8">
-        <p className="font-semibold tracking-[0.25em] text-purple-200">INWI VIP NUMBER</p>
+        <p className="font-semibold tracking-[0.25em] text-purple-200">NADIYA RATKALAF</p>
         <p className="mt-2">Premium purple luxury marketplace.</p>
       </footer>
     </main>

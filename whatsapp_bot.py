@@ -705,320 +705,92 @@ def test_webhook():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     """WhatsApp Cloud API Webhook"""
+    # ── GET: Verification handshake ──────────────────────────────────────────
     if request.method == "GET":
-        mode = request.args.get("hub.mode")
-        token = request.args.get("hub.verify_token")
-        challenge = request.args.get("hub.challenge")
-        
-        if mode and token:
-            if mode == "subscribe" and token == VERIFY_TOKEN:
-                logging.info("✅ [WEBHOOK] Verification successful!")
-                return challenge, 200
-            else:
-                logging.warning(f"❌ [WEBHOOK] Invalid token!")
-                return "Forbidden", 403
-        return "Webhook is active", 200
-    
+        try:
+            mode      = request.args.get("hub.mode")
+            token     = request.args.get("hub.verify_token")
+            challenge = request.args.get("hub.challenge")
+            verify_token = VERIFY_TOKEN  # already loaded at startup
+            if mode and token:
+                if mode == "subscribe" and token == verify_token:
+                    logging.info("✅ [WEBHOOK] Verification successful!")
+                    return challenge, 200
+                else:
+                    logging.warning(f"❌ [WEBHOOK] Invalid verify token received: '{token}'")
+                    return "Forbidden", 403
+            return "Webhook is active", 200
+        except Exception as e:
+            logging.error(f"❌ [WEBHOOK GET] Exception: {e}")
+            return "Internal Server Error", 500
+
+    # ── POST: Incoming message ───────────────────────────────────────────────
     try:
         data = request.get_json(force=True)
         logging.info(f"📥 [WEBHOOK RAW] {str(data)[:300]}...")
-        
-        if 'entry' in data and data['entry'][0]['changes'][0]['value'].get('messages'):
-            msg = data['entry'][0]['changes'][0]['value']['messages'][0]
-            msg_id = msg.get('id', '')
-            
-            # Check if already processed (LRU cache)
+
+        if not (data and 'entry' in data):
+            return "ok", 200
+
+        changes = data['entry'][0].get('changes', [{}])
+        value   = changes[0].get('value', {})
+        messages = value.get('messages')
+        if not messages:
+            return "ok", 200
+
+        msg    = messages[0]
+        msg_id = msg.get('id', '')
+
+        # ── De-duplicate: skip already-processed messages ──
+        with shared_lock:
             if msg_id in processed_messages:
                 logging.info(f"⏭️  [WEBHOOK] Already processed: {msg_id}")
                 return "ok", 200
-            
-            # Add to processed messages
-            with shared_lock:
-                processed_messages[msg_id] = True
-                # Keep only last MAX_PROCESSED_MESSAGES
-                if len(processed_messages) > MAX_PROCESSED_MESSAGES:
-                    # Remove oldest entries
-                    for _ in range(len(processed_messages) - MAX_PROCESSED_MESSAGES):
-                        processed_messages.popitem(last=False)
-            
-            sender = "".join(filter(str.isdigit, msg['from']))
-            logging.info(f"📩 [RECEIVE] From: {sender} | Message ID: {msg_id}")
-            
+            # Mark as processed BEFORE handling (prevents race condition)
+            processed_messages[msg_id] = True
+            if len(processed_messages) > MAX_PROCESSED_MESSAGES:
+                processed_messages.popitem(last=False)
+
+        sender = "".join(filter(str.isdigit, msg['from']))
+
+        # ── Alert admin about every non-admin message ──
+        if sender != ADMIN_PHONE:
             if msg.get('type') == 'text':
-                body = msg['text']['body']
-                logging.info(f"💬 [MESSAGE] Text: {body[:100]}")
-                if sender != ADMIN_PHONE:
-                    known_leads = _get_known_leads()
-                    if sender not in known_leads:
-                        try:
-                            send_admin_notification("212638388885", f"🚨 New Lead Clicked: {sender}")
-                        except Exception as e:
-                            logging.error(f"❌ [ADMIN ALERT FAIL] {e}")
-                reply = handle_logic(sender, body)
-                if reply:  # Only send if there's a reply
-                    send_whatsapp_async(sender, reply)
-            elif msg.get('type') in ('image','document','audio','video','sticker'):
-                logging.info(f"📎 [MEDIA] Type: {msg.get('type')}")
-                notify_admin_media(sender, msg.get('type'))
-                reply = pick_response("media_received")
-                if reply:
-                    send_whatsapp_async(sender, reply)
-                    
+                body_preview = msg['text']['body'][:100]
+                alert_msg = (
+                    f"🚨 رسالة جديدة من: {sender}\n"
+                    f"الرسالة: {body_preview}\n"
+                    f"تواصل: https://wa.me/{sender}"
+                )
+            else:
+                alert_msg = (
+                    f"🚨 ميديا جديدة من: {sender}\n"
+                    f"النوع: {msg.get('type')}\n"
+                    f"تواصل: https://wa.me/{sender}"
+                )
+            send_whatsapp_async(ADMIN_PHONE, alert_msg)
+            logging.info(f"[SYSTEM] Lead alert sent to {ADMIN_PHONE} for {sender}")
+
+        # ── Process message ──
+        if msg.get('type') == 'text':
+            reply = handle_logic(sender, msg['text']['body'])
+            if reply:
+                send_whatsapp_async(sender, reply)
+        elif msg.get('type') in ('image', 'document', 'audio', 'video', 'sticker'):
+            notify_admin_media(sender, msg.get('type'))
+            reply = pick_response("media_received")
+            if reply:
+                send_whatsapp_async(sender, reply)
+
         return "ok", 200
+
     except Exception as e:
-        logging.error(f"❌ [WEBHOOK ERROR]: {e}")
-        return "error", 500
-
-@app.route("/api/register", methods=["POST"])
-def api_register():
-    """Register a phone number to receive bot notifications and updates"""
-    try:
-        data = request.get_json(force=True)
-        phone = "".join(filter(str.isdigit, str(data.get("phone", "")).strip()))
-        name = data.get("name", "").strip()
-        
-        if not phone or len(phone) < 9:
-            return jsonify({"error": "رقم هاتف غير صحيح — صيفط رقم صحيح 📱"}), 400
-        
-        # Save to known leads
-        leads = _get_known_leads()
-        leads.add(phone)
-        save_json(LEADS_FILE, list(leads))
-        
-        # Log registration
-        logging.info(f"✅ [REGISTER] Phone: {phone} | Name: {name}")
-        
-        # Send welcome message
-        msg = f"✨ مرحبا {name or 'سيدي'}! \n\n✅ تم تسجيلك بنجاح!\n\nستتلقى من الآن الجديد من الأرقام المتاحة والعروضات. 🎯\n\nصيفط ليا الرقم اللي بغيت باش نكملو 📞"
-        threading.Thread(target=send_whatsapp, args=(phone, msg)).start()
-        
-        return jsonify({"ok": True, "message": "✅ تم التسجيل بنجاح!", "phone": phone}), 200
-    except Exception as e:
-        logging.error(f"[Register Error]: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/chat", methods=["POST"])
-def api_chat():
-    try:
-        data = request.get_json(force=True)
-        user_text = data.get("prompt", "").strip()
-        sender = data.get("sender", "web_user_default")
-        if not user_text: return jsonify({"response": "صيفط ليا رسالتك 😊"})
-        reply = handle_logic(sender, user_text)
-        return jsonify({"response": reply or ""})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/whatsapp-click", methods=["POST"])
-def api_whatsapp_click():
-    try:
-        data = request.get_json(force=True)
-        number = data.get("number", "").strip()
-        price = data.get("price", "N/A").strip()
-        tier = data.get("tier", "VIP").strip()
-        sender_info = data.get("sender", "")
-        user_agent = request.headers.get("User-Agent", "")
-        ip_address = request.environ.get("HTTP_X_FORWARDED_FOR", request.remote_addr)
-
-        if not number:
-            return jsonify({"error": "number required"}), 400
-
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        admin_alert = (
-            f"🔥 *كليك على رقم VIP من الويب!*\n"
-            f"📱 الرقم: *{number}*\n"
-            f"💰 السعر: *{price}*\n"
-            f"🎯 المستوى: *{tier}*\n"
-            f"👤 المعلومات: {sender_info or 'N/A'}\n"
-            f"🌐 IP: {ip_address}\n"
-            f"⏰ الوقت: {timestamp}\n"
-            f"📊 الجهاز: {user_agent[:60]}\n\n"
-            f"👉 اضغط للتواصل: https://wa.me/{ADMIN_PHONE}"
-        )
-
-        send_whatsapp_async(ADMIN_PHONE, admin_alert)
-        logging.info(f"✅ [WHATSAPP CLICK] Number: {number} | Tier: {tier} | Price: {price} | IP: {ip_address}")
-
-        return jsonify({"ok": True, "redirect": f"https://wa.me/212638388885?text={quote(f'Salam, bghit nreservi had nmra VIP: {number} - {price} - Tier: {tier}')}"})
-    except Exception as e:
-        logging.error(f"❌ [WHATSAPP CLICK ERROR] {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/static/<path:filename>")
-def serve_static(filename): return send_file(os.path.join(BASE_DIR, filename))
-
-@app.route("/api/full_catalog")
-def api_catalog(): return jsonify(load_json(CATALOG_FILE, {}))
-
-@app.route("/api/orders")
-@require_auth
-def api_orders(): return jsonify(load_json(ORDERS_FILE, []))
-
-@app.route("/api/sessions")
-def api_sessions(): return jsonify(load_json(SESSIONS_FILE, {}))
-
-@app.route("/api/catalog_stats")
-def api_catalog_stats():
-    catalog = load_json(CATALOG_FILE, {})
-    avail = sum(1 for items in catalog.values() for i in items if i.get("status","available") == "available")
-    sold = sum(1 for items in catalog.values() for i in items if i.get("status") == "sold")
-    return jsonify({"total": avail+sold, "available": avail, "sold": sold})
-
-@app.route("/api/catalog/manage", methods=["POST"])
-@require_auth
-def api_catalog_manage():
-    try:
-        data = request.get_json(force=True)
-        action = data.get("action")
-        catalog = load_json(CATALOG_FILE, {})
-        if action == "add":
-            num = data.get("number","").strip()
-            tier = data.get("tier","gold").strip().lower()
-            price = data.get("price","100 DH").strip()
-            if not num: return jsonify({"error": "number required"}), 400
-            if not _is_allowed_price(price):
-                return jsonify({"error": "price must be between 100 and 200 DH"}), 400
-            if tier not in catalog: catalog[tier] = []
-            catalog[tier].append({"number": num, "price": price, "status": "available"})
-            save_json(CATALOG_FILE, catalog)
-            return jsonify({"ok": True})
-        elif action == "delete":
-            num = data.get("number","").strip()
-            for t in catalog:
-                catalog[t] = [i for i in catalog[t] if i.get("number") != num]
-            save_json(CATALOG_FILE, catalog)
-            return jsonify({"ok": True})
-        return jsonify({"error": "unknown action"}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/broadcast", methods=["POST"])
-@require_auth
-def api_broadcast():
-    """Send a message to all registered users (admin only)"""
-    try:
-        data = request.get_json(force=True)
-        message = data.get("message", "").strip()
-        if not message:
-            return jsonify({"error": "رسالة مطلوبة"}), 400
-        
-        leads = _get_known_leads()
-        sent_count = 0
-        failed = []
-        
-        for phone in leads:
-            if phone != ADMIN_PHONE:  # Don't send to admin twice
-                if send_whatsapp(phone, message):
-                    sent_count += 1
-                else:
-                    failed.append(phone)
-        
-        logging.info(f"📢 [BROADCAST] Sent: {sent_count} | Failed: {len(failed)}")
-        return jsonify({
-            "ok": True, 
-            "sent": sent_count, 
-            "failed": len(failed),
-            "message": f"تم الإرسال إلى {sent_count} مستخدم ✅"
-        }), 200
-    except Exception as e:
-        logging.error(f"[Broadcast Error]: {e}")
-        return jsonify({"error": str(e)}), 500
-
-# --- End of Routes ---
-
-@app.route("/whatsapp/<phone>", methods=["GET"])
-def whatsapp_redirect(phone):
-    """Direct WhatsApp link endpoint - format: /whatsapp/0638388885 or /whatsapp/212638388885"""
-    clean_phone = "".join(filter(str.isdigit, phone))
-    if len(clean_phone) < 9:
-        return jsonify({"error": "Invalid phone number"}), 400
-    # Ensure it starts with country code
-    if not clean_phone.startswith("212"):
-        clean_phone = "212" + clean_phone.lstrip("0") if clean_phone.startswith("0") else "212" + clean_phone
-    
-    wa_url = f"https://wa.me/{clean_phone}"
-    return f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Connecting to WhatsApp...</title>
-        <script>window.location.href='{wa_url}';</script>
-    </head>
-    <body>Redirecting...</body>
-    </html>
-    """
-
-@app.route("/<path:path>")
-def catch_all(path):
-    """Serve React app for all routes that don't match API or static files"""
-    if (path.startswith('api/') or path.startswith('webhook') or path.startswith('dashboard') 
-        or path.startswith('static/') or path.startswith('pastry') or path.startswith('whatsapp')):
-        return jsonify({"error": "Not found"}), 404
-    try:
-        return send_from_directory('dist', 'index.html')
-    except:
-        return "<h2>✅ VIP Numbers Bot — React App Running</h2>", 200
-
-# --- Keep-alive & Maintenance ---
-def keep_alive():
-    """Periodically ping the server and clean up memory"""
-    url = os.environ.get("RENDER_EXTERNAL_URL", "")
-    counter = 0
-    while True:
-        try:
-            time.sleep(300)  # Ping every 5 minutes
-            
-            # Ping the server
-            if url:
-                try:
-                    r = requests.get(f"{url}/health", timeout=10)
-                    if r.status_code == 200:
-                        logging.info(f"✅ [KEEP-ALIVE] Server ping successful")
-                    else:
-                        logging.warning(f"⚠️ [KEEP-ALIVE] Unexpected status: {r.status_code}")
-                except requests.Timeout:
-                    logging.warning(f"⏱️ [KEEP-ALIVE] Server ping timeout")
-                except Exception as e:
-                    logging.warning(f"⚠️ [KEEP-ALIVE] Error: {e}")
-            
-            # Every 10 cycles (50 minutes), clean up old sessions
-            counter += 1
-            if counter >= 10:
-                counter = 0
-                try:
-                    sessions = load_json(SESSIONS_FILE, {})
-                    before = len(sessions)
-                    now = datetime.now().timestamp()
-                    # Remove sessions older than 24 hours
-                    sessions = {k: v for k, v in sessions.items() if now - v.get("timestamp", now) < 86400}
-                    save_json(SESSIONS_FILE, sessions)
-                    after = len(sessions)
-                    logging.info(f"🧹 [CLEANUP] Sessions: {before} → {after}")
-                except Exception as e:
-                    logging.error(f"❌ [CLEANUP ERROR]: {e}")
-        except Exception as e:
-            logging.error(f"❌ [KEEP-ALIVE ERROR]: {e}")
-            time.sleep(60)  # Wait before retrying
-
-def shutdown():
-    """Graceful shutdown"""
-    logging.info("🛑 [SHUTDOWN] Shutting down gracefully...")
-    try:
-        whatsapp_executor.shutdown(wait=True)
-        logging.info("✅ [SHUTDOWN] Thread pool shutdown complete")
-    except Exception as e:
-        logging.error(f"❌ [SHUTDOWN ERROR]: {e}")
-
-atexit.register(shutdown)
-
-if __name__ == "__main__":
-    # Start keep-alive thread
-    keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
-    keep_alive_thread.start()
-    logging.info("🚀 [START] VIP Numbers Bot started successfully")
-    
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+        logging.error(f"❌ [WEBHOOK POST ERROR]: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
+        # Always return 200 so Meta does not retry in a loop
+        return "ok", 200

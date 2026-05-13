@@ -224,7 +224,7 @@ def format_catalog_message():
         has_available = True
         lines.append(f"🔹 *{tier.upper()}:*")
         for item in available:
-            lines.append(f"   📱 {item['number']} — *{item.get('price', 'N/A')}*")
+            lines.append(f"  📱 {item['number']} — *{item.get('price', 'N/A')}*")
         lines.append("")
     
     # إذا ما كاينش نوامر متوفرين

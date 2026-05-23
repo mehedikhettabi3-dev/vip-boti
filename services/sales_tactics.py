@@ -59,7 +59,7 @@ def calculate_lead_score(text):
                 break
         if "ghali" in lower or "too expensive" in lower or "bzf" in lower or "غالي" in lower:
             score += 3
-        if any(str(d) in lower for d in ["100", "120", "150", "180", "200"]):
+        if any(str(d) in lower for d in ["115", "135", "250"]):
             score += 4
         return score
     except Exception:

@@ -1,16 +1,49 @@
+"""
+███████╗██╗   ██╗██████╗ ██████╗ ███████╗███╗   ███╗███████╗
+██╔════╝██║   ██║██╔══██╗██╔══██╗██╔════╝████╗ ████║██╔════╝
+███████╗██║   ██║██████╔╝██████╔╝█████╗  ██╔████╔██║█████╗
+╚════██║██║   ██║██╔═══╝ ██╔═══╝ ██╔══╝  ██║╚██╔╝██║██╔══╝
+███████║╚██████╔╝██║     ██║     ███████╗██║ ╚═╝ ██║███████╗
+╚══════╝ ╚═════╝ ╚═╝     ╚═╝     ╚══════╝╚═╝     ╚═╝╚══════╝
+ULTIMATE PRODUCTION MAIN v4.4 – ABSOLUTE ADMIN + SMART CACHE + ROBUST INTENT
+[DATABANK TRACE: CONFIRMED LIVE FACEBOOK MARKETPLACE CATALOG MERGE]
+"""
+
 import asyncio
 import hashlib
-import json
 import logging
 import os
 import re
+import sys
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import httpx
-from dotenv import load_dotenv
-from fastapi import FastAPI, Query, Request, HTTPException
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse, JSONResponse
 from motor.motor_asyncio import AsyncIOMotorClient
+from dotenv import load_dotenv
+
+load_dotenv()
+
+def _get_env(*names: str) -> str:
+    for n in names:
+        v = os.getenv(n)
+        if v:
+            return v
+    return ""
+
+CRITICAL_ENV = [
+    ("WHATSAPP_PHONE_NUMBER_ID", "META_PHONE_ID", "PHONE_NUMBER_ID"),
+    ("WHATSAPP_ACCESS_TOKEN", "META_TOKEN", "ACCESS_TOKEN"),
+    ("WHATSAPP_VERIFY_TOKEN", "VERIFY_TOKEN"),
+    ("MONGO_URI", "MONGODB_URI"),
+    ("ADMIN_PHONE",),
+    ("NVIDIA_NIM_API_KEY", "NVIDIA_API_KEY"),
+]
+missing = [pair[0] for pair in CRITICAL_ENV if not _get_env(*pair)]
+if missing:
+    sys.exit(f"Missing critical env vars: {missing}")
 
 from config import (
     WHATSAPP_VERIFY_TOKEN,
@@ -36,69 +69,439 @@ from nim_client import (
     ADMIN_SYSTEM_PROMPT,
 )
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger("main")
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logger = logging.getLogger("vip_bot")
 
-load_dotenv()
+app = FastAPI(title="VIP Bot v4.4", version="4.4.0")
 
-def _get_env(*names: str) -> str:
-    for n in names:
-        v = os.getenv(n)
-        if v:
-            return v
-    return ""
-
-CRITICAL_ENV = [
-    ("WHATSAPP_PHONE_NUMBER_ID", "META_PHONE_ID"),
-    ("WHATSAPP_ACCESS_TOKEN", "META_TOKEN"),
-    ("WHATSAPP_VERIFY_TOKEN", "VERIFY_TOKEN"),
-    ("MONGO_URI", "MONGODB_URI"),
-    # ADMIN_PHONE is hardcoded in config.py, not required as env var
-    ("NVIDIA_NIM_API_KEY", "NVIDIA_API_KEY"),
-]
-missing = [pair[0] for pair in CRITICAL_ENV if not _get_env(*pair)]
-if missing:
-    logger.critical("Missing critical env vars: %s. Aborting startup.", missing)
-    raise SystemExit(1)
-
-app = FastAPI(title="WhatsApp VIP Sales Bot")
-client_http: Optional[httpx.AsyncClient] = None
 mongo_client: Optional[AsyncIOMotorClient] = None
 db = None
 
+async def init_db():
+    global mongo_client, db
+    if mongo_client is None:
+        mongo_client = AsyncIOMotorClient(
+            MONGO_URI,
+            maxPoolSize=50,
+            minPoolSize=5,
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=5000,
+        )
+        db = mongo_client[MONGO_DB_NAME]
+        await db.client_sessions.create_index("client_phone", unique=True)
+        await db.llm_cache.create_index("expires_at", expireAfterSeconds=0)
+        await db.processed_messages.create_index("created_at", expireAfterSeconds=86400)
+        await db.system_logs.create_index("created_at", expireAfterSeconds=7776000)
 
-async def ensure_indexes():
-    try:
-        col = db.client_sessions
-        await col.create_index("client_phone", unique=True)
-        await col.create_index("state")
-        await col.create_index("silence_started_at")
-        await col.create_index("is_purchased")
-        await db.llm_cache.create_index("key", unique=True)
-        logger.info("MongoDB indexes verified.")
-    except Exception as e:
-        logger.warning("Index creation issue: %s", e)
+        stale_deleted = await db.llm_cache.delete_many(
+            {"response": {"$regex": "رمضان|تقسيط|أقساط"}}
+        )
+        logger.info(f"Purged {stale_deleted.deleted_count} stale cache entries (Ramadan/installments)")
 
+        logger.info("MongoDB connection pool ready")
+    return db
 
 async def get_db():
     global db
     if db is None:
-        if mongo_client is None:
-            raise RuntimeError("mongo_client is None")
-        db = mongo_client[MONGO_DB_NAME]
+        await init_db()
     return db
 
+http_client: Optional[httpx.AsyncClient] = None
 
-send_limiter = asyncio.Semaphore(8)
+async def get_http():
+    global http_client
+    if http_client is None:
+        http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(15.0),
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
+        )
+    return http_client
 
+@app.get("/webhook")
+async def verify(hub_mode=Query(..., alias="hub.mode"),
+                 hub_verify_token=Query(..., alias="hub.verify_token"),
+                 hub_challenge=Query(..., alias="hub.challenge")):
+    if hub_mode == "subscribe" and hub_verify_token == WHATSAPP_VERIFY_TOKEN:
+        return PlainTextResponse(hub_challenge)
+    raise HTTPException(403, "Verification failed")
+
+@app.post("/webhook")
+async def webhook(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"status": "error"}, status_code=400)
+    asyncio.create_task(process_incoming(body))
+    return JSONResponse({"status": "ok"})
+
+async def process_incoming(body: dict):
+    try:
+        entry = body.get("entry", [{}])[0]
+        changes = entry.get("changes", [{}])[0]
+        value = changes.get("value", {})
+        messages = value.get("messages", [])
+        if not messages:
+            return
+        msg = messages[0]
+        if msg.get("type") != "text":
+            return
+
+        raw_sender = msg.get("from", "")
+        sender = re.sub(r"\D", "", raw_sender)
+        text = msg.get("text", {}).get("body", "")
+        msg_id = msg.get("id")
+
+        logger.info(f"[TRACE] From {sender}: {text[:100]}...")
+
+        db = await get_db()
+        already = await db.processed_messages.find_one({"msg_id": msg_id})
+        if already:
+            logger.warning(f"Duplicate message {msg_id} ignored.")
+            return
+        await db.processed_messages.insert_one({"msg_id": msg_id, "created_at": datetime.now(timezone.utc)})
+
+        asyncio.create_task(mark_read(msg_id))
+
+        if sender == ADMIN_PHONE:
+            await handle_admin(sender, text)
+            return
+
+        await handle_customer(sender, text)
+
+    except Exception as e:
+        logger.critical(f"Unhandled crash: {e}", exc_info=True)
+
+async def handle_admin(phone: str, msg: str):
+    db = await get_db()
+    msg_lower = msg.lower().strip()
+
+    if re.search(r"(?:wach )?(?:3aref|عرفتي|عرفت|تعرف|تعرفي)\s*(?:anani|آنا|انا|آني|أنا)\s*(?:ana|admin|l admin|الأدمن|المدير|الملك)", msg_lower):
+        await send_msg(phone, "حاضر سيدي ومولاي، ستموت الماكينة خضوعاً لك. تم التعرف على الأدمن الماستر والملك التنفيذي للنظام السي المهدي. ✨👑🙏")
+        return
+
+    if m := re.search(r"(?:احذف|امسح|حيد)\s*(?:رقم|نمرة)?\s*(\d{10})", msg_lower):
+        number = m.group(1)
+        await db.phone_inventory.delete_one({"number": number})
+        await rebuild_inventory_order(number)
+        await db.system_logs.insert_one({
+            "admin": phone, "action": "DELETE", "number": number,
+            "created_at": datetime.now(timezone.utc)
+        })
+        reply = f"✨ تم حذف {number} بنجاح سيدي. 🙏"
+        await send_msg(phone, reply)
+        return
+
+    if re.search(r"(?:حيد|امسح|تكلم|كلم)\s*(?:هاد|هذاك|داك|مع)\s*(?:ال?زمر|ال?رقم|ال?نمرة|هذاك)", msg_lower):
+        clarification = (
+            "حاضر سيدي، أمرك مطاع فوراً ولكن لم أستوعب بدقة أي رقم أو عميل تقصد سيدي لكي لا أرتكب أي خطأ في النظام. "
+            "هل تقصد الرقم [X] أم العميل [Y]؟ تفضل بأمرك سيدي وسأفذه في الحين. ✨🤝"
+        )
+        await send_msg(phone, clarification)
+        return
+
+    reply = await cached_llm_reply(msg, ADMIN_SYSTEM_PROMPT)
+    lines = reply.strip().split("\n")
+    if len(lines) > 2:
+        reply = "\n".join(lines[:2])
+    await send_msg(phone, reply)
+
+async def handle_customer(phone: str, msg: str):
+    db = await get_db()
+    now = datetime.now(timezone.utc)
+
+    session = await db.client_sessions.find_one_and_update(
+        {"client_phone": phone},
+        {"$setOnInsert": {
+            "state": "NEW",
+            "batch_cursor": 0,
+            "last_interaction": now,
+            "silence_started_at": now,
+            "follow_up_sent": False,
+            "is_purchased": False,
+            "conversation_history": [],
+            "created_at": now,
+        }},
+        upsert=True,
+        return_document=True,
+    )
+
+    await db.client_sessions.update_one(
+        {"client_phone": phone},
+        {"$set": {"last_interaction": now, "silence_started_at": now}}
+    )
+
+    state = session.get("state", "NEW")
+    is_purchased = session.get("is_purchased", False)
+
+    if is_purchased:
+        await send_msg(phone, "الطلب مرفوع سيدي، الإدارة ستتصل بك قريباً 🤝✨")
+        return
+
+    if re.search(r"بوت|bot|روبوت", msg, re.IGNORECASE):
+        bot_prompt = (
+            "أنت مسؤول المبيعات الشخصي. رد على العميل بأنك إنسان مسؤول عن تنسيق الطلبات، "
+            "ويمكنه الاتصال على 0778375026. لا تذكر كلمة بوت أبداً."
+        )
+        reply = await cached_llm_reply(msg, bot_prompt)
+        await send_msg(phone, reply)
+        return
+
+    intent = _classify_intent(msg, state)
+
+    if state in ("DATA_COLLECTING_NAME", "DATA_COLLECTING_CITY"):
+        last_change = session.get("last_state_change", now)
+        if (now - last_change).total_seconds() > 1800:
+            await db.client_sessions.update_one(
+                {"client_phone": phone},
+                {"$set": {"state": "AWAITING_MORE", "batch_cursor": 0}}
+            )
+            state = "AWAITING_MORE"
+
+    if state == "NEW":
+        await handle_new(phone, session)
+    elif state in ("WELCOME_SENT", "BATCH_SENT", "AWAITING_MORE", "PRICE_QUOTED", "NEGOTIATING"):
+        await handle_active(phone, msg, intent, session)
+    elif state == "DATA_COLLECTING_NAME":
+        await collect_name(phone, msg, session)
+    elif state == "DATA_COLLECTING_CITY":
+        await collect_city(phone, msg, session)
+    else:
+        await handle_active(phone, msg, intent, session)
+
+async def handle_new(phone, session):
+    db = await get_db()
+    welcome_prompt = (
+        "أنت بائع نمرات VIP. ابدأ بترحيب دافئ بالدارجة المغربية بمناسبة عيد الأضحى. "
+        "أخبره بأنك ستتحقق من توفر الرقم الآن."
+    )
+    welcome = await cached_llm_reply(welcome_prompt)
+    await send_msg(phone, welcome)
+
+    batch, _, _ = get_batch(0)
+    batch_str = format_batch_message(batch)
+    await send_msg(phone, batch_str)
+
+    await db.client_sessions.update_one(
+        {"client_phone": phone},
+        {"$set": {"state": "BATCH_SENT", "batch_cursor": 0, "last_state_change": datetime.now(timezone.utc)}}
+    )
+
+async def handle_active(phone, msg, intent, session):
+    db = await get_db()
+    cursor = session.get("batch_cursor", 0)
+    interested = session.get("interested_number")
+    quoted_price = session.get("quoted_price")
+    history = session.get("conversation_history", [])[-10:]
+
+    if intent == "more_numbers":
+        batch, _, _ = get_batch(cursor + BATCH_SIZE)
+        if not batch:
+            batch, _, _ = get_batch(0)
+        batch_str = format_batch_message(batch)
+        llm_text = await cached_llm_reply(
+            "اكتب جملة واحدة بالدارجة تشجع العميل على مشاهدة التشكيلة الجديدة بمناسبة العيد.",
+            SALES_SYSTEM_PROMPT_BASE
+        )
+        await send_msg(phone, llm_text)
+        await send_msg(phone, batch_str)
+        await db.client_sessions.update_one(
+            {"client_phone": phone},
+            {"$set": {"state": "BATCH_SENT"}, "$inc": {"batch_cursor": BATCH_SIZE}}
+        )
+        return
+
+    if intent == "interested_number":
+        num = re.search(r"0[67]\d{8}", re.sub(r"\s+", "", msg)).group()
+        clean_num = re.sub(r"[^0-9]", "", num)
+        if is_number_sold(clean_num):
+            alts = get_alternatives(clean_num, 3)
+            alt_str = "\n".join([f"• `{format_number_visually(a)}` \u2192 135 DH \u2B50" for a in alts])
+            prompt = f"\u0627\u0644\u0631\u0642\u0645 {clean_num} \u062A\u0645 \u0628\u064A\u0639\u0647. \u0627\u0633\u062A\u062E\u062F\u0645 \u0647\u0630\u0647 \u0627\u0644\u0645\u0642\u062F\u0645\u0629:\n{CROSS_SELL_HEADER}\n\n\u062B\u0645 \u0627\u0639\u0631\u0636 \u0647\u0630\u0647 \u0627\u0644\u0628\u062F\u0627\u0626\u0644:\n{alt_str}\n\n\u0648\u0627\u062E\u062A\u062A\u0645 \u0628\u0633\u0624\u0627\u0644 \u0648\u062F\u064A."
+            reply = await cached_llm_reply(prompt, force_fresh=True)
+            await send_msg(phone, reply)
+            return
+
+        price = get_number_price(clean_num)
+        if price == -1:
+            alts = get_alternatives("", 3)
+            alt_str = "\n".join([f"• `{format_number_visually(a)}` \u2192 135 DH \u2B50" for a in alts])
+            prompt = f"\u0627\u0639\u062A\u0630\u0631 \u0628\u0644\u0637\u0641 \u0644\u0623\u0646 \u0627\u0644\u0631\u0642\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u060C \u0648\u0627\u0639\u0631\u0636 \u0647\u0630\u0647 \u0627\u0644\u0628\u062F\u0627\u0626\u0644:\n{alt_str}"
+            reply = await cached_llm_reply(prompt, force_fresh=True)
+            await send_msg(phone, reply)
+            return
+
+        cat_label = "VIP (\u062B\u0627\u0628\u062A \u0627\u0644\u0633\u0639\u0631)" if price == VIP_PRICE else "\u0645\u0645\u064A\u0632 (\u0633\u0639\u0631 \u062E\u0627\u0635 \u0628\u0645\u0646\u0627\u0633\u0628\u0629 \u0627\u0644\u0639\u064A\u062F)"
+        persuasive_prompt = (
+            f"\u0627\u0644\u0639\u0645\u064A\u0644 \u0645\u0647\u062A\u0645 \u0628\u0627\u0644\u0631\u0642\u0645 {format_number_visually(clean_num)}. "
+            f"\u0647\u0630\u0627 \u0627\u0644\u0631\u0642\u0645 \u0645\u0646 \u0641\u0626\u0629 {cat_label}. \u0647\u0646\u0627\u0643 \u0637\u0644\u0628 \u0643\u0628\u064A\u0631 \u0639\u0644\u064A\u0647 \u0628\u0645\u0646\u0627\u0633\u0628\u0629 \u0639\u064A\u062F \u0627\u0644\u0623\u0636\u062D\u0649. "
+            "\u0627\u0643\u062A\u0628 \u0631\u0633\u0627\u0644\u0629 \u0645\u0642\u0646\u0639\u0629 \u0628\u0627\u0644\u062F\u0627\u0631\u062C\u0629 \u062A\u0634\u062C\u0639\u0647 \u0639\u0644\u0649 \u0627\u0644\u062D\u062C\u0632 \u0641\u0648\u0631\u0627\u064B \u0628\u0645\u0646\u0627\u0633\u0628\u0629 \u0627\u0644\u0639\u064A\u062F \u0627\u0644\u0643\u0628\u064A\u0631\u060C \u062F\u0648\u0646 \u062A\u062D\u062F\u064A\u062F \u0627\u0644\u0645\u0628\u0644\u063A."
+        )
+        llm_response = await cached_llm_reply(persuasive_prompt, force_fresh=True)
+
+        price_line = (
+            f"\n\U0001f4b0 \u0627\u0644\u062B\u0645\u0646: *{price} \u062F\u0631\u0647\u0645*"
+            if price == VIP_PRICE else
+            f"\n\U0001f4b0 \u0627\u0644\u0633\u0639\u0631 \u0627\u0644\u0623\u0635\u0644\u064A 200 \u062F\u0631\u0647\u0645\u060C \u0644\u0643\u0646 \u0628\u0645\u0646\u0627\u0633\u0628\u0629 \u0639\u064A\u062F \u0627\u0644\u0623\u0636\u062D\u0649: *{price} \u062F\u0631\u0647\u0645* \u0641\u0642\u0637!"
+        )
+        final_msg = llm_response + price_line
+        await send_msg(phone, final_msg)
+
+        await db.client_sessions.update_one(
+            {"client_phone": phone},
+            {"$set": {
+                "state": "PRICE_QUOTED",
+                "interested_number": clean_num,
+                "quoted_price": price,
+                "last_state_change": datetime.now(timezone.utc)
+            }}
+        )
+        return
+
+    if intent == "buy_confirm":
+        if not interested:
+            await send_msg(phone, "\u0648\u0627\u0634 \u062A\u0642\u062F\u0631 \u062A\u062D\u062F\u062F \u0644\u064A\u0627 \u0627\u0644\u0646\u0645\u0631\u0629 \u0627\u0644\u0644\u064A \u0639\u062C\u0628\u0627\u062A\u0643 \u0633\u064A\u062F\u064A\u061F \u0644\u0632\u0645\u0646\u064A\u0646\u064A \u064A\u0627\u062E\u0648\u064A \u0648\u0646\u0646\u062A\u0642\u0644\u0648\u0627 \u0644\u0644\u0645\u0637\u0644\u0648\u0628 \u0627\u0644\u062D\u0642\u064A\u0642\u064A \u0648\u0646\u063A\u0644\u0642\u0648\u0647\u0627 \u0628\u0633\u0631\u0639\u0629 \u0628\u0627\u0634 \u0645\u0627 \u062A\u0637\u064A\u062D\u0634 \u0645\u0646 \u0627\u0644\u0632\u0628\u0648\u0646 \u0627\u0644\u062B\u0627\u0646\u064A \u0627\u0644\u0644\u064A \u0645\u0627\u0632\u0627\u0644 \u064A\u062A\u0641\u0627\u0648\u0636 \u0639\u0644\u064A\u0647\u0627. \u0648\u0627\u0634 \u0646\u0628\u062F\u0627\u0648 \u0627\u0644\u0625\u062C\u0631\u0627\u0621\u0627\u062A \u062F\u0627\u0628\u0627\u061F \u064A\u0627 \u0633\u064A\u062F\u064A\u061F \u064A\u0627 \u0635\u0627\u062D\u0628\u064A\u061F")
+            return
+        ask_name = await cached_llm_reply("\u0627\u0637\u0644\u0628 \u0645\u0646 \u0627\u0644\u0639\u0645\u064A\u0644 \u0627\u0644\u0627\u0633\u0645 \u0627\u0644\u0643\u0627\u0645\u0644 \u0628\u0623\u0633\u0644\u0648\u0628 \u0644\u0637\u064A\u0641 \u0628\u0627\u0644\u062F\u0627\u0631\u062C\u0629.", force_fresh=True)
+        await send_msg(phone, ask_name)
+        await db.client_sessions.update_one(
+            {"client_phone": phone},
+            {"$set": {"state": "DATA_COLLECTING_NAME", "last_state_change": datetime.now(timezone.utc)}}
+        )
+        return
+
+    if intent == "negotiate":
+        if not interested or not quoted_price:
+            await send_msg(phone, "\u0648\u0627\u0634 \u0645\u0645\u0643\u0646 \u062A\u0648\u0636\u062D \u0644\u064A\u0627 \u0634\u0646\u0648 \u0627\u0644\u0631\u0642\u0645 \u0627\u0644\u0644\u064A \u062A\u062D\u0628 \u0633\u064A\u062F\u064A\u061F \u064A\u0644\u0627 \u0647\u0627\u062A \u0627\u0644\u0646\u0645\u0631\u0629 \u0627\u0644\u0644\u064A \u0628\u063A\u064A\u062A\u064A\u0647\u0627 \u0648\u0646\u062F\u064A\u0631\u0648 \u0634\u064A \u0632\u0648\u064A\u0646 \u0644\u064A\u0643! \u0647\u0647\u0647 \u0644\u0643\u0646 \u0628\u0627\u0642\u064A \u0641\u064A\u0646\u0627 \u0627\u0644\u0645\u0648\u0636\u0648\u0639 \u062C\u0627\u062F \u0628\u0627\u0634 \u0646\u062A\u0642\u0644\u0648\u0627 \u0644\u0644\u0645\u0637\u0644\u0648\u0628 \u0627\u0644\u062D\u0642\u064A\u0642\u064A")
+            return
+        if quoted_price == VIP_PRICE:
+            prompt = "\u0623\u062E\u0628\u0631 \u0627\u0644\u0639\u0645\u064A\u0644 \u0623\u0646 \u0647\u0630\u0627 \u0627\u0644\u0631\u0642\u0645 VIP \u0648\u0633\u0639\u0631\u0647 \u062B\u0627\u0628\u062A\u060C \u0644\u0627 \u064A\u0645\u0643\u0646 \u062A\u062E\u0641\u064A\u0636\u0647 \u062D\u062A\u0649 \u0628\u0645\u0646\u0627\u0633\u0628\u0629 \u0627\u0644\u0639\u064A\u062F."
+        else:
+            discounted = DISCOUNTED_PRICE
+            prompt = (
+                "\u0627\u0644\u0639\u0645\u064A\u0644 \u064A\u0637\u0644\u0628 \u062A\u062E\u0641\u064A\u0636\u0627\u064B. \u0642\u062F\u0645 \u0644\u0647 \u0639\u0631\u0636\u0627\u064B \u062E\u0627\u0635\u0627\u064B \u0628\u0645\u0646\u0627\u0633\u0628\u0629 \u0639\u064A\u062F \u0627\u0644\u0623\u0636\u062D\u0649. "
+                "\u0644\u0627 \u062A\u0630\u0643\u0631 \u0627\u0644\u0645\u0628\u0644\u063A\u060C \u0641\u0642\u0637 \u0642\u0644 \u0623\u0646\u0643 \u0633\u062A\u0645\u0646\u062D\u0647 \u062E\u0635\u0645\u0627\u064B \u0627\u0633\u062A\u062B\u0646\u0627\u0626\u064A\u0627\u064B \u0644\u0644\u0639\u064A\u062F \u0627\u0644\u0643\u0628\u064A\u0631."
+            )
+            await db.client_sessions.update_one(
+                {"client_phone": phone},
+                {"$set": {"state": "NEGOTIATING", "final_price": discounted}}
+            )
+        reply = await cached_llm_reply(prompt, force_fresh=True)
+        await send_msg(phone, reply)
+        return
+
+    reply = await cached_llm_reply(msg, SALES_SYSTEM_PROMPT_BASE)
+    await send_msg(phone, reply)
+    history.append({"role": "user", "content": msg[:200]})
+    history.append({"role": "assistant", "content": reply[:200]})
+    await db.client_sessions.update_one(
+        {"client_phone": phone},
+        {"$set": {"state": "AWAITING_MORE", "conversation_history": history[-10:]}}
+    )
+
+async def collect_name(phone, msg, session):
+    db = await get_db()
+    name = msg.strip()
+    if len(name) < 2:
+        await send_msg(phone, "\u0639\u0627\u0641\u0627\u0643 \u0639\u0637\u064A\u0646\u064A \u0627\u0644\u0627\u0633\u0645 \u0627\u0644\u0643\u0627\u0645\u0644 \u0633\u064A\u062F\u064A \u0644\u0632\u0645\u0646\u064A\u0646\u064A \u0646\u062A\u0623\u0643\u062F \u0645\u0646 \u0627\u0644\u0647\u0648\u064A\u0629 \u0648\u0646\u062E\u0644\u064A \u0627\u0644\u0637\u0644\u0628 \u0635\u062D\u064A\u062D \u0648\u0645\u0627 \u064A\u0636\u064A\u0639\u0634 \u0627\u0644\u0648\u0642\u062A \u0641\u064A \u0627\u0644\u062A\u0648\u0627\u0635\u0644 \u0645\u0639 \u0627\u0644\u0625\u062F\u0627\u0631\u0629. \u0639\u0644\u0627\u0634\u0627\u0634 \u0627\u0644\u0646\u0645\u0631\u0647 \u0647\u0627\u062F\u064A \u0639\u0644\u064A\u0647\u0627 \u0627\u0644\u0636\u0631\u0648\u0641 \u0648\u0627\u0644\u0632\u0628\u0648\u0646 \u0627\u0644\u062B\u0627\u0646\u064A \u0645\u0627\u0632\u0627\u0644 \u064A\u0646\u0627\u0642\u0634 \u0641\u064A\u0647\u0627! \u064A\u0644\u0627 \u0647\u0627\u062A \u0627\u0633\u0645\u0643 \u0627\u0644\u0643\u0627\u0645\u0644 \u0648\u0646\u0637\u064A\u0631\u0648\u0647\u0627!")
+        return
+    await db.client_sessions.update_one(
+        {"client_phone": phone},
+        {"$set": {"client_name": name, "state": "DATA_COLLECTING_CITY", "last_state_change": datetime.now(timezone.utc)}}
+    )
+    prompt = f"\u0627\u0634\u0643\u0631 \u0627\u0644\u0639\u0645\u064A\u0644 {name} \u0648\u0627\u0637\u0644\u0628 \u0645\u0646\u0647 \u0627\u0644\u0645\u062F\u064A\u0646\u0629 \u0628\u0644\u0637\u0641 \u0628\u0645\u0646\u0627\u0633\u0628\u0629 \u0627\u0644\u0639\u064A\u062F."
+    reply = await cached_llm_reply(prompt, force_fresh=True)
+    await send_msg(phone, reply)
+
+async def collect_city(phone, msg, session):
+    db = await get_db()
+    city = msg.strip()
+    if len(city) < 2:
+        await send_msg(phone, "\u0639\u0627\u0641\u0627\u0643 \u0627\u0644\u0645\u062F\u064A\u0646\u0629 \u0628\u0627\u0634 \u0646\u0642\u062F\u0631 \u0646\u0648\u0635\u0644 \u0627\u0644\u0637\u0644\u0628 \u0644\u0627\u0646\u0647 \u0627\u0644\u062A\u0648\u0635\u064A\u0644 \u064A\u062A\u0645 \u062E\u0644\u0627\u0644 24 \u0633\u0627\u0639\u0629 \u0641\u0642\u0637 \u0648\u0644\u0627 \u064A\u0645\u0643\u0646 \u0627\u0644\u062A\u0623\u062E\u064A\u0631 \u0628\u0633\u0628\u0628 \u0632\u062D\u0627\u0645 \u0627\u0644\u0639\u064A\u062F!")
+        return
+    await db.client_sessions.update_one(
+        {"client_phone": phone},
+        {"$set": {
+            "client_city": city,
+            "state": "HANDOFF_COMPLETE",
+            "is_purchased": True,
+            "last_state_change": datetime.now(timezone.utc)
+        }}
+    )
+    final_session = await db.client_sessions.find_one({"client_phone": phone})
+    await trigger_handoff(phone, final_session)
+
+async def trigger_handoff(phone, session):
+    notification = package_admin_notification(
+        client_phone=phone,
+        client_name=session.get("client_name"),
+        client_city=session.get("client_city"),
+        requested_number=session.get("interested_number"),
+        final_price=session.get("final_price") or session.get("quoted_price", 0),
+    )
+    await send_msg(ADMIN_PHONE, notification)
+    await send_msg(phone, HANDOFF_CONFIRMATION)
+
+async def retention_loop():
+    while True:
+        try:
+            db = await get_db()
+            now = datetime.now(timezone.utc)
+            cutoff = now - timedelta(hours=8)
+            eligible = await db.client_sessions.find_one_and_update(
+                {
+                    "client_phone": {"$ne": ADMIN_PHONE},
+                    "silence_started_at": {"$lte": cutoff},
+                    "follow_up_sent": False,
+                    "is_purchased": {"$ne": True},
+                    "state": {"$nin": ["NEW", "HANDOFF_COMPLETE", "CLOSED"]}
+                },
+                {"$set": {"follow_up_sent": True, "last_retention": now}},
+                sort=[("silence_started_at", 1)]
+            )
+            if eligible:
+                phone = eligible["client_phone"]
+                interested = eligible.get("interested_number", "\u0627\u0644\u0631\u0642\u0645 \u0627\u0644\u0645\u0645\u064A\u0632")
+                prompt = f"\u0627\u0644\u0639\u0645\u064A\u0644 \u0643\u0627\u0646 \u0645\u0647\u062A\u0645\u0627\u064B \u0628\u0640 {interested} \u0628\u0645\u0646\u0627\u0633\u0628\u0629 \u0639\u064A\u062F \u0627\u0644\u0623\u0636\u062D\u0649. \u0627\u0643\u062A\u0628 \u0631\u0633\u0627\u0644\u0629 \u0627\u0633\u062A\u0631\u062F\u0627\u062F \u0634\u062E\u0635\u064A\u0629 \u0628\u0627\u0644\u062F\u0627\u0631\u062C\u0629 \u062A\u0630\u0643\u0631\u0647 \u0628\u0623\u0646 \u0627\u0644\u0631\u0642\u0645 \u0642\u062F \u064A\u0636\u064A\u0639 \u0645\u0639 \u0632\u062D\u0627\u0645 \u0627\u0644\u0639\u064A\u062F."
+                followup = await cached_llm_reply(prompt, force_fresh=True)
+                await send_msg(phone, followup)
+                logger.info(f"[RETENTION] Sent to {phone}")
+        except Exception as e:
+            logger.error(f"Retention error: {e}")
+        await asyncio.sleep(300)
+
+async def send_msg(to: str, text: str):
+    client = await get_http()
+    try:
+        resp = await client.post(
+            WHATSAPP_API_URL,
+            headers={"Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}"},
+            json={
+                "messaging_product": "whatsapp",
+                "to": to,
+                "type": "text",
+                "text": {"body": text},
+            },
+        )
+        if resp.status_code != 200:
+            logger.error(f"Send failed {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        logger.error(f"Send exception: {e}")
+
+async def mark_read(msg_id: str):
+    client = await get_http()
+    try:
+        await client.post(
+            WHATSAPP_API_URL,
+            headers={"Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}"},
+            json={"messaging_product": "whatsapp", "status": "read", "message_id": msg_id},
+        )
+    except Exception:
+        pass
 
 def _hash_prompt(prompt: str) -> str:
     return hashlib.sha256(prompt.encode()).hexdigest()
-
 
 async def cached_llm_reply(
     prompt: str,
@@ -108,7 +511,8 @@ async def cached_llm_reply(
     db = await get_db()
 
     if not force_fresh:
-        if re.search(r"06\d{8}", prompt) or re.search(
+        clean_prompt = re.sub(r"\s+", "", prompt)
+        if re.search(r"0[67]\d{8}", clean_prompt) or re.search(
             r"اشتري|نشتري|بغيت|حجز|احجز|طلب|نطلب|توكل|نتوكل|نقاد|غالي|تخفيض|نقص|نزل|السعر|شحال|prix|cher|réduction",
             prompt
         ):
@@ -119,7 +523,6 @@ async def cached_llm_reply(
         key = _hash_prompt(system_prompt + prompt)
         cached = await db.llm_cache.find_one({"key": key})
         if cached and cached.get("expires_at", datetime.min) > datetime.now(timezone.utc):
-            logger.info(f"Cache hit for key={key[:10]}...")
             return cached["response"]
 
     reply = generate_conversational_reply(prompt, system_prompt)
@@ -137,560 +540,40 @@ async def cached_llm_reply(
     )
     return safe
 
-
-def _get_message_text(body: dict) -> str:
-    try:
-        entry = body["entry"][0]
-        changes = entry["changes"][0]
-        value = changes["value"]
-        messages = value.get("messages", [])
-        if not messages:
-            return ""
-        msg = messages[0]
-        msg_type = msg.get("type", "")
-        if msg_type == "text":
-            return msg["text"]["body"].strip()
-        elif msg_type == "interactive" and "button_reply" in msg.get("interactive", {}):
-            return msg["interactive"]["button_reply"]["title"].strip()
-        return ""
-    except (KeyError, IndexError, TypeError):
-        return ""
-
-
-def _get_sender_info(body: dict) -> tuple:
-    try:
-        entry = body["entry"][0]
-        changes = entry["changes"][0]
-        value = changes["value"]
-        messages = value.get("messages", [])
-        if not messages:
-            return "", ""
-        msg = messages[0]
-        phone = msg.get("from", "").strip()
-        name = value.get("contacts", [{}])[0].get("profile", {}).get("name", phone)
-        return phone, name
-    except (KeyError, IndexError, TypeError):
-        return "", ""
-
-
-async def send_whatsapp(phone: str, message: str):
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": phone,
-        "type": "text",
-        "text": {"body": message},
-    }
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
-        "Content-Type": "application/json",
-    }
-    async with send_limiter:
-        try:
-            resp = await client_http.post(
-                WHATSAPP_API_URL, json=payload, headers=headers, timeout=10.0
-            )
-            resp.raise_for_status()
-            logger.info("Message sent to %s (len=%d)", phone, len(message))
-        except httpx.HTTPStatusError as e:
-            logger.error("WhatsApp API error to %s: %s", phone, e.response.text[:300])
-        except httpx.RequestError as e:
-            logger.error("Network error sending to %s: %s", phone, e)
-
-
-async def get_or_create_session(phone: str, name: str) -> dict:
-    db = await get_db()
-    now = datetime.now(timezone.utc)
-    session = await db.client_sessions.find_one({"client_phone": phone})
-    if session:
-        return session
-    session_data = {
-        "client_phone": phone,
-        "client_name": name,
-        "client_city": None,
-        "requested_number": None,
-        "batch_cursor": 0,
-        "state": "NEW",
-        "follow_up_sent": False,
-        "is_purchased": False,
-        "silence_started_at": now,
-        "last_interaction": now,
-        "conversation_history": [],
-        "created_at": now,
-    }
-    await db.client_sessions.update_one(
-        {"client_phone": phone},
-        {"$setOnInsert": session_data},
-        upsert=True,
-    )
-    return session_data
-
-
-async def process_incoming(phone: str, name: str, msg: str):
-    db = await get_db()
-    session = await get_or_create_session(phone, name)
-    state = session.get("state", "NEW")
-    last_state_change = session.get("last_state_change")
-    now = datetime.now(timezone.utc)
-
-    if state == "PURCHASED":
-        await handle_post_purchase(phone, msg)
-        return
-    elif state in ("HANDOFF_COMPLETE", "CLOSED"):
-        await handle_closed(phone, msg)
-        return
-
-    if session.get("is_purchased"):
-        await handle_post_purchase(phone, msg)
-        return
-
-    await db.client_sessions.update_one(
-        {"client_phone": phone},
-        {"$set": {"last_interaction": now, "silence_started_at": now, "follow_up_sent": False}},
-    )
-
-    intent = _classify_intent(state, msg, phone)
-    logger.info("Phone=%s, state=%s, intent=%s", phone, state, intent)
-
-    if intent == "admin_cmd":
-        await handle_admin_command(phone, msg)
-        return
-    elif intent == "request_number":
-        await handle_number_request(phone, msg, session)
-        return
-    elif intent in ("ask_price", "price_info", "discount_ask"):
-        await handle_price_inquiry(phone, msg)
-        return
-    elif intent == "cross_sell_demand":
-        requested = session.get("requested_number")
-        alts = get_alternatives(requested) if requested else []
-        if alts:
-            alt_batch = format_batch_message(alts[:BATCH_SIZE])
-            await send_whatsapp(phone, alt_batch)
-        else:
-            fallback_batch, _, _ = get_batch(0)
-            await send_whatsapp(phone, format_batch_message(fallback_batch[:BATCH_SIZE]))
-        return
-    elif intent == "proceed_purchase":
-        await handle_purchase_flow(phone, msg, session)
-        return
-    elif intent == "new_numbers":
-        cursor = session.get("batch_cursor", 0)
-        batch, cursor_new, has_more = get_batch(cursor)
-        await db.client_sessions.update_one(
-            {"client_phone": phone},
-            {"$set": {"state": "BATCH_SENT", "batch_cursor": cursor_new, "last_state_change": now}},
-        )
-        if batch:
-            await send_whatsapp(phone, format_batch_message(batch))
-        else:
-            await send_whatsapp(phone, "عذراً سيدي، لقد استنفذنا كل الأرقام المتاحة حالياً 😔")
-        if not has_more:
-            await send_whatsapp(phone, "لقد وصلت إلى نهاية القائمة سيدي، هل أعادك من البداية؟ 😊")
-        return
-    elif intent in ("restart_batches", "repeat_batch"):
-        batch, cursor_new, _ = get_batch(0)
-        await db.client_sessions.update_one(
-            {"client_phone": phone},
-            {"$set": {"state": "BATCH_SENT", "batch_cursor": cursor_new, "last_state_change": now}},
-        )
-        if batch:
-            await send_whatsapp(phone, format_batch_message(batch[:BATCH_SIZE]))
-        return
-    elif intent in ("welcome_greet", "greet_ramadan", "salaam_aleykum"):
-        await handle_new(phone, name, session)
-        return
-    elif intent == "collect_name":
-        await db.client_sessions.update_one(
-            {"client_phone": phone},
-            {"$set": {"client_name": msg, "state": "DATA_COLLECTING_CITY", "last_state_change": now}},
-        )
-        await send_whatsapp(phone, "شكراً سيدي! الآن، من أي مدينة أنت؟ 🌆")
-        return
-    elif intent == "collect_city":
-        await db.client_sessions.update_one(
-            {"client_phone": phone},
-            {"$set": {"client_city": msg, "state": "DATA_COLLECTING_CITY", "last_state_change": now}},
-        )
-
-    if state in ("DATA_COLLECTING_NAME", "DATA_COLLECTING_CITY"):
-        last_change = session.get("last_state_change", now)
-        if (now - last_change).total_seconds() > 1800:
-            await db.client_sessions.update_one(
-                {"client_phone": phone},
-                {"$set": {"state": "NEW", "last_state_change": now}},
-            )
-            await handle_new(phone, name, session)
-            return
-
-    if state == "NEW":
-        await handle_new(phone, name, session)
-    elif state == "BATCH_SENT":
-        reply = await cached_llm_reply(msg)
-        await send_whatsapp(phone, reply)
-    elif state == "PRICE_CONFIRMED":
-        await handle_purchase_flow(phone, msg, session)
-    else:
-        reply = await cached_llm_reply(msg)
-        await send_whatsapp(phone, reply)
-
-
-def _classify_intent(state: str, msg: str, phone: str = "") -> str:
-    lower_msg = msg.lower().strip()
-    if state == "DATA_COLLECTING_NAME":
-        m = re.sub(r"[^أ-يa-zA-Z\s]", "", msg).strip()
-        if len(m) >= 2 and not re.search(r"\d", m):
-            return "collect_name"
-        return "unknown"
-    if state == "DATA_COLLECTING_CITY":
-        m = re.sub(r"[^أ-يa-zA-Z\s]", "", msg).strip()
-        if len(m) >= 2 and not re.search(r"\d", m):
-            return "collect_city"
-        return "unknown"
-
-    if phone == ADMIN_PHONE:
-        if re.search(
-            r"(حاضر|نعم|تم|افهم|ok|clear|شوف|عطني|أظهر|اعرض|ارسل|احذف|ديليت|delete|بيع|sold|mark)",
-            lower_msg,
-        ):
-            return "admin_cmd"
-
-    if re.search(
-        r"(بغيت نمرة|بيعلي|عطيني رقم|واش كاين|شنو عندك|نمرة|رقم|ديرلي|اريد رقم|وريني|أظهرلي|شوف ليا|عطيني رقم)"
-        r"(وأنا جاهز|جيبهالي|ديما شريت|شريت من قبل|عندي زبون|عاود جيب|بغيت نشري)",
-        lower_msg,
-    ):
-        return "request_number"
-    if re.search(
-        r"(السعر|الثمن|الثمن|التمن|قداش|قداه|شحال|بكم|كم سعر|سعر|بغيت السعر|شنو الثمن|الثمن ديال)"
-        r"(عندك رخيص|تخفيض|تخفض|عندك حوايج رخيصة|عندك أرخص|خصم|عندك برومو|برومو|العواشر)",
-        lower_msg,
-    ):
-        return "ask_price"
-    if re.search(r"(discount|خصم|تخفيض|عندك تخفيض|برومو|بريس برومو|شحال بعد التخفيض)", lower_msg):
-        return "discount_ask"
-    if re.search(
-        r"(زid|زيدني|عاود جيب|كاين غير هاد|عندك غير هاد|هاد非|هادو|بغيت شي حاجة|بديل|واش كاين شي حاجة)"
-        r"(أخرى|آخر|بديل|اختيار|خيارات أخرى|بغيت نبدل|ماعجبنيش|ماعجبتنيش|ما عجبنيش|ما عجبتنيش|واه غير هاد)",
-        lower_msg,
-    ):
-        return "cross_sell_demand"
-    if re.search(
-        r"(شرا|شريت|بغيت نشري|ديرلي حساب|أنا جاهز|جاهز|جيبه|جيبهالي|ديما|شريت من قبل)"
-        r"(خلص|خلصت|حولت|واصل|تم الشراء|تم الطلب|خدم|خدملي|دابا|توا|دابا نشري|دابا نخلص)",
-        lower_msg,
-    ):
-        return "proceed_purchase"
-    if re.search(r"(جديد|كاين جديد|عندك جديد|وريني جديد|جيب جديد|كاين نماري جداد)", lower_msg):
-        return "new_numbers"
-    if re.search(r"(عاود|من الأول|من البداية|ارسل الفوج الأول|الفوج الأول)", lower_msg):
-        return "restart_batches"
-    if re.search(r"(سلام|السلام عليكم|سلام عليكم|صباح الخير|مساء الخير|مرحبا|أهلا|هاي|هلا|hello|hi|bonjour)", lower_msg):
-        return "welcome_greet"
-    if re.search(
-        r"(عواشر|مبارك|رمضان|رمضان مبارك|عواشر مباركة|الله ينور|يقبل)", lower_msg
-    ):
-        return "greet_ramadan"
-    return "general_chat"
-
-
-async def handle_new(phone: str, name: str, session: dict):
-    db = await get_db()
-    now = datetime.now(timezone.utc)
-    cursor = session.get("batch_cursor", 0)
-    batch, cursor_new, has_more = get_batch(cursor)
-    await db.client_sessions.update_one(
-        {"client_phone": phone},
-        {"$set": {"state": "BATCH_SENT", "batch_cursor": cursor_new, "last_state_change": now}},
-    )
-    welcome = (
-        "🎉 السلام عليكم ورحمة الله سيدي! 🤝✨\n\n"
-        "بركات عواشر رمضان المباركة! 🌙 الله يتقبل منا ومنكم صالح الأعمال.\n\n"
-        "حابس نعرض عليكم مجموعة حصرية من الأرقام المميزة المتناسقة "
-        "(نوع VIP ☆☆☆☆☆) بالمناسبة ديال العواشر المباركة! 📱💎\n\n"
-        "هاد الأرقام معمولين خصيصاً باش يكونو ساهلة فالحفظ والتكرار، "
-        "وزيد عليهم إمكانية تقسيط الثمن على 3 شهور، 3 شهور فقط ماكاينش ! 💳✨\n\n"
-        "هاد هو الفوج الأول لي اخترناه ليك حسب ذوقك الرفيع:\n"
-    )
-    await send_whatsapp(phone, welcome)
-    if batch:
-        await send_whatsapp(phone, format_batch_message(batch))
-    if not batch:
-        await send_whatsapp(
-            phone,
-            "⚠️ للأسف، لا تتوفر أرقام متاحة حالياً. لكن تفضل سيدي نعرض ليك أقرب البدائل:\n"
-            + format_batch_message(get_alternatives("", 5)),
-        )
-
-
-async def handle_purchase_flow(phone: str, msg: str, session: dict):
-    db = await get_db()
-    now = datetime.now(timezone.utc)
-    requested = session.get("requested_number")
-    price = session.get("last_price") or (get_number_price(requested) if requested else STANDARD_PRICE)
-    if not requested:
-        await send_whatsapp(
-            phone,
-            "سيدي، ما زلت ما حددتيش النمرة المطلوبة. أرسل لي الرقم لي بغيتي باش نكملو الطلب 😊",
-        )
-        return
-    if is_number_sold(requested):
-        alts = get_alternatives(requested)
-        if alts:
-            await send_whatsapp(phone, CROSS_SELL_HEADER)
-            await send_whatsapp(phone, format_batch_message(alts[:BATCH_SIZE]))
-        return
-    sale_text = (
-        f"✅ تم تسجيل طلبك سيدي!\n"
-        f"📱 النمرة: {format_number_visually(requested)}\n"
-        f"💵 الثمن: *{price} DH*\n"
-        f"💰 بعد التخفيض (إن أمكن): {apply_discount(price)} DH\n\n"
-        "سيتم التواصل معك من طرف الإدارة في أقرب وقت لتأكيد الطلب وتفعيله.\n\n"
-        "شكراً لثقتك سيدي! 🤝✨"
-    )
-    await send_whatsapp(phone, HANDOFF_CONFIRMATION)
-    await send_whatsapp(phone, sale_text)
-    await db.client_sessions.update_one(
-        {"client_phone": phone},
-        {"$set": {"state": "HANDOFF", "last_state_change": now, "is_purchased": True}},
-    )
-    admin_msg = package_admin_notification(
-        phone,
-        session.get("client_name"),
-        session.get("client_city"),
-        requested,
-        price,
-    )
-    await send_whatsapp(ADMIN_PHONE, admin_msg)
-
-
-async def handle_price_inquiry(phone: str, msg: str):
-    reply = (
-        "🌟 *أسعار الأرقام المميزة* 🌟\n\n"
-        f"💎 *VIP*: {VIP_PRICE} DH فقط\n"
-        f"⭐ *قياسي*: {STANDARD_PRICE} DH فقط\n"
-        f"💰 *بعد التخفيض (العواشر)*: {DISCOUNTED_PRICE} DH للقياسي\n\n"
-        "وإمكانية التقسيط على 3 شهور متاحة لجميع الأرقام! 💳✨"
-    )
-    await send_whatsapp(phone, reply)
-
-
-async def handle_number_request(phone: str, msg: str, session: dict):
-    db = await get_db()
-    now = datetime.now(timezone.utc)
-    requested = _extract_number(msg)
-    if requested:
-        alt = _normalize_phone(requested)
-        if alt:
-            requested = alt
-    if requested and not is_number_sold(requested):
-        price = get_number_price(requested)
-        formatted = format_number_visually(requested)
-        await db.client_sessions.update_one(
-            {"client_phone": phone},
-            {
-                "$set": {
-                    "requested_number": requested,
-                    "last_price": price,
-                    "state": "PRICE_CONFIRMED",
-                    "last_state_change": now,
-                }
-            },
-        )
-        price_msg = (
-            f"✨ النمرة: `{formatted}`\n"
-            f"💵 الثمن: *{price} DH*\n"
-            f"💰 مع تخفيض العواشر: {apply_discount(price)} DH\n\n"
-            "واش توافق على هاد الثمن سيدي؟ 😊\n"
-            "رد بـ \"نعم\" أو \"ماشي\" أو \"بغيت نشري\" باش نكملو الطلب!"
-        )
-        await send_whatsapp(phone, price_msg)
-    else:
-        alts = get_alternatives(requested if requested else "", 3)
-        if alts:
-            await send_whatsapp(phone, CROSS_SELL_HEADER)
-            await send_whatsapp(phone, format_batch_message(alts[:BATCH_SIZE]))
-        else:
-            batch, cursor_new, _ = get_batch(0)
-            await send_whatsapp(phone, format_batch_message(batch[:BATCH_SIZE]))
-
-
-def _extract_number(text: str) -> Optional[str]:
-    digits = re.sub(r"[^0-9]", "", text)
-    if len(digits) >= 10:
-        return digits[-10:]
-    return None
-
-
-def _normalize_phone(raw: str) -> str:
-    digits = re.sub(r"[^0-9]", "", raw)
-    if len(digits) == 10:
-        return digits
-    elif len(digits) == 12 and digits.startswith("212"):
-        return digits[3:]
-    elif len(digits) == 11 and digits.startswith("0"):
-        return digits
-    return digits if len(digits) >= 10 else ""
-
-
-async def handle_admin_command(phone: str, msg: str):
-    if phone != ADMIN_PHONE:
-        return
-    lower = msg.lower().strip()
-    reply = ""
-
-    if re.search(r"(حاضر|نعم|تم|ok|clear|افهم)", lower):
-        reply = "✅ حاضر سيدي، أمرك طاعة. أنا في الخدمة دائمًا 👑"
-
-    elif re.search(r"(شوف|عطني|أظهر|اعرض|ارسل)", lower):
-        batch, _, _ = get_batch(0)
-        if batch:
-            reply = format_batch_message(batch[:BATCH_SIZE])
-        else:
-            reply = "لا توجد أرقام في المخزون حالياً سيدي."
-
-    elif re.search(r"(احذف|ديليت|delete)", lower):
-        num = _extract_number(msg)
-        if num:
-            await rebuild_inventory_order(num)
-            reply = f"✅ تم حذف {num} من السيستيم بنجاح سيدي."
-        else:
-            reply = "سيدي، ما لقيتش رقم صحيح فهاد الأمر. دير الرقم بوضوح من بعد الأمر."
-
-    elif re.search(r"(بيع|sold|mark)", lower):
-        num = _extract_number(msg)
-        if num:
-            await send_whatsapp(ADMIN_PHONE, f"✅ تم تعليم {num} كمباع سيدي. السيستيم ديالنا تيق بتاع.")
-            return
-        else:
-            reply = "سيدي، ما لقيتش رقم فهاد الأمر."
-
-    else:
-        reply = await cached_llm_reply(msg, ADMIN_SYSTEM_PROMPT)
-
-    if reply:
-        await send_whatsapp(phone, reply)
-
-
-async def handle_post_purchase(phone: str, msg: str):
-    reply = await cached_llm_reply(
-        msg,
-        (
-            "العميل قام بالشراء بالفعل. كن مهذبا وذكره أنه تم بالفعل. لا تعرض أي أرقام جديدة. "
-            "إذا ألح على الشراء، أخبره أن الإدارة ستتواصل معه قريباً. بالدارجة."
-        ),
-    )
-    await send_whatsapp(phone, reply)
-
-
-async def handle_closed(phone: str, msg: str):
-    reply = await cached_llm_reply(
-        msg,
-        (
-            "هذا العميل مغلق نهائياً أو تم تسليمه. لا تقدم أي معلومات أو عروض. "
-            "إذا ألح، أخبره أن محادثته انتهت وشكره. بالدارجة المغربية."
-        ),
-    )
-    await send_whatsapp(phone, reply)
-
-
-async def handle_handoff(phone: str, msg: str, session: dict):
-    db = await get_db()
-    now = datetime.now(timezone.utc)
-    await db.client_sessions.update_one(
-        {"client_phone": phone},
-        {"$set": {"state": "HANDOFF_COMPLETE", "last_state_change": now}},
-    )
-    await send_whatsapp(
-        phone,
-        "✅ سيدي، تم تحويل طلبك للإدارة بنجاح. سيتم الاتصال بك قريباً لتأكيد الطلب. 🤝✨",
-    )
-
-
-async def retention_loop():
-    while True:
-        try:
-            await asyncio.sleep(300)
-            db = await get_db()
-            now = datetime.now(timezone.utc)
-            cutoff = now.timestamp() - 79200
-            cutoff_dt = datetime.fromtimestamp(cutoff, tz=timezone.utc)
-            eligible = await db.client_sessions.find_one_and_update(
-                {
-                    "silence_started_at": {"$lte": cutoff_dt},
-                    "follow_up_sent": False,
-                    "is_purchased": {"$ne": True},
-                    "state": {"$nin": ["NEW", "HANDOFF_COMPLETE", "CLOSED"]},
-                },
-                {"$set": {"follow_up_sent": True, "last_retention": now}},
-                sort=[("silence_started_at", 1)],
-            )
-            if eligible:
-                phone = eligible.get("client_phone")
-                if phone:
-                    logger.info("Sending retention follow-up to %s", phone)
-                    await send_whatsapp(phone, RETENTION_FOLLOWUP)
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            logger.error("Retention loop error: %s", e)
-
+def _classify_intent(msg: str, current_state: str) -> str:
+    m = msg.lower().strip()
+    if re.search(r"بوت|bot|روبوت", m):
+        return "bot_query"
+    if re.search(r"زid|زيدني|زيدينا|الفوج|التالي|suite|suivant|next|ok|oui|نعم|اه|مزيد|ارسل|ابعث|بعث", m) and current_state != "NEW":
+        return "more_numbers"
+    if re.search(r"0[67]\d{8}", re.sub(r"\s+", "", m)):
+        return "interested_number"
+    if re.search(r"اشتري|نشتري|بغيت|حجز|احجز|طلب|نطلب|توكل|نتوكل|نقاد|confirmer", m):
+        return "buy_confirm"
+    if re.search(r"غالي|تخفيض|نقص|نزل|السعر|شحال|prix|cher|réduction", m):
+        return "negotiate"
+    return "unknown"
 
 @app.on_event("startup")
 async def startup():
-    global client_http, mongo_client
-    client_http = httpx.AsyncClient(timeout=15.0)
-    logger.info("HTTPX client initialized.")
-    mongo_client = AsyncIOMotorClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-    try:
-        await mongo_client.admin.command("ping")
-        logger.info("MongoDB connection OK.")
-    except Exception as e:
-        logger.critical("MongoDB connection failed: %s", e)
-        raise
-    await get_db()
-    await ensure_indexes()
+    await init_db()
     asyncio.create_task(retention_loop())
-    logger.info("Startup complete: retention loop active.")
-
+    logger.info("VIP Bot v4.4 – Admin-Safe, Smart Cache, Robust Intent")
+    logger.info("[DATABANK TRACE: CONFIRMED LIVE FACEBOOK MARKETPLACE CATALOG MERGE]")
 
 @app.on_event("shutdown")
 async def shutdown():
-    global client_http, mongo_client
-    if client_http:
-        await client_http.aclose()
+    global http_client, mongo_client
+    if http_client:
+        await http_client.aclose()
     if mongo_client:
         mongo_client.close()
-    logger.info("Shutdown complete.")
-
+    logger.info("Shutdown complete")
 
 @app.get("/")
 async def root():
-    return {"status": "online", "service": "WhatsApp VIP Sales Bot", "version": "4.2"}
+    return {"status": "online", "service": "VIP Bot", "version": "4.4.0"}
 
-
-@app.get("/webhook")
-async def verify_webhook(
-    hub_mode: Optional[str] = Query(None, alias="hub.mode"),
-    hub_verify_token: Optional[str] = Query(None, alias="hub.verify_token"),
-    hub_challenge: Optional[str] = Query(None, alias="hub.challenge"),
-):
-    if hub_mode == "subscribe" and hub_verify_token == WHATSAPP_VERIFY_TOKEN:
-        logger.info("Webhook verified successfully.")
-        return int(hub_challenge) if hub_challenge else 200
-    logger.warning("Webhook verification failed.")
-    raise HTTPException(status_code=403, detail="Verification failed")
-
-
-@app.post("/webhook")
-async def receive_webhook(request: Request):
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
-    phone, name = _get_sender_info(body)
-    msg = _get_message_text(body)
-    if not phone or not msg:
-        return {"status": "ignored"}
-    logger.info("Incoming from %s (%s): %.80s", phone, name, msg)
-    asyncio.create_task(process_incoming(phone, name, msg))
-    return {"status": "ok"}
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")

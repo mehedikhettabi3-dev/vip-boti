@@ -9,10 +9,10 @@ WHATSAPP_PHONE_NUMBER_ID: Final[str] = os.getenv("WHATSAPP_PHONE_NUMBER_ID", os.
 WHATSAPP_ACCESS_TOKEN: Final[str] = os.getenv("WHATSAPP_ACCESS_TOKEN", os.getenv("META_TOKEN", ""))
 WHATSAPP_API_VERSION: Final[str] = "v21.0"
 WHATSAPP_API_URL: Final[str] = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{WHATSAPP_PHONE_NUMBER_ID}/messages"
-WHATSAPP_VERIFY_TOKEN: Final[str] = os.getenv("WHATSAPP_VERIFY_TOKEN", os.getenv("VERIFY_TOKEN", "vip_sales_secure_2026"))
+WHATSAPP_VERIFY_TOKEN: Final[str] = os.getenv("WHATSAPP_VERIFY_TOKEN", os.getenv("VERIFY_TOKEN", "MehediVip2026"))
 
 MONGO_URI: Final[str] = os.getenv("MONGO_URI", os.getenv("MONGODB_URI", ""))
-MONGO_DB_NAME: Final[str] = "whatsapp_vip_bot"
+MONGO_DB_NAME: Final[str] = "vip_numbers_bot"
 MONGO_COLL_SESSIONS: Final[str] = "client_sessions"
 MONGO_COLL_INVENTORY: Final[str] = "phone_inventory"
 MONGO_COLL_LOGS: Final[str] = "system_logs"

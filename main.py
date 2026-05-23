@@ -57,7 +57,7 @@ CRITICAL_ENV = [
     ("WHATSAPP_ACCESS_TOKEN", "META_TOKEN"),
     ("WHATSAPP_VERIFY_TOKEN", "VERIFY_TOKEN"),
     ("MONGO_URI", "MONGODB_URI"),
-    ("ADMIN_PHONE",),
+    # ADMIN_PHONE is hardcoded in config.py, not required as env var
     ("NVIDIA_NIM_API_KEY", "NVIDIA_API_KEY"),
 ]
 missing = [pair[0] for pair in CRITICAL_ENV if not _get_env(*pair)]

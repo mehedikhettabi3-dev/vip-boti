@@ -45,11 +45,22 @@ logger = logging.getLogger("main")
 
 load_dotenv()
 
+def _get_env(*names: str) -> str:
+    for n in names:
+        v = os.getenv(n)
+        if v:
+            return v
+    return ""
+
 CRITICAL_ENV = [
-    "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_ACCESS_TOKEN", "WHATSAPP_VERIFY_TOKEN",
-    "MONGO_URI", "ADMIN_PHONE", "NVIDIA_NIM_API_KEY"
+    ("WHATSAPP_PHONE_NUMBER_ID", "META_PHONE_ID"),
+    ("WHATSAPP_ACCESS_TOKEN", "META_TOKEN"),
+    ("WHATSAPP_VERIFY_TOKEN", "VERIFY_TOKEN"),
+    ("MONGO_URI", "MONGODB_URI"),
+    ("ADMIN_PHONE",),
+    ("NVIDIA_NIM_API_KEY", "NVIDIA_API_KEY"),
 ]
-missing = [v for v in CRITICAL_ENV if not os.getenv(v)]
+missing = [pair[0] for pair in CRITICAL_ENV if not _get_env(*pair)]
 if missing:
     logger.critical("Missing critical env vars: %s. Aborting startup.", missing)
     raise SystemExit(1)

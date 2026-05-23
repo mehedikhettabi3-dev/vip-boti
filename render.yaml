@@ -5,19 +5,15 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
     envVars:
-      - key: NVIDIA_API_KEY
+      - key: NVIDIA_NIM_API_KEY
         fromEnv: NVIDIA_API_KEY
-      - key: NVIDIA_NIM_ENDPOINT
-        fromEnv: NVIDIA_NIM_ENDPOINT
-      - key: NVIDIA_NIM_MODEL
-        fromEnv: NVIDIA_NIM_MODEL
-      - key: MONGODB_URI
-        fromEnv: MONGODB_URI
-      - key: MONGODB_DB_NAME
-        fromEnv: MONGODB_DB_NAME
-      - key: META_TOKEN
+      - key: WHATSAPP_ACCESS_TOKEN
         fromEnv: META_TOKEN
-      - key: META_PHONE_ID
+      - key: WHATSAPP_PHONE_NUMBER_ID
         fromEnv: META_PHONE_ID
-      - key: VERIFY_TOKEN
+      - key: WHATSAPP_VERIFY_TOKEN
         fromEnv: VERIFY_TOKEN
+      - key: MONGO_URI
+        fromEnv: MONGODB_URI
+      - key: ADMIN_PHONE
+        value: 212778375026

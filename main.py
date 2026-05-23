@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
@@ -78,6 +78,7 @@ async def ensure_indexes():
         await col.create_index("state")
         await col.create_index("silence_started_at")
         await col.create_index("is_purchased")
+        await db.llm_cache.create_index("key", unique=True)
         logger.info("MongoDB indexes verified.")
     except Exception as e:
         logger.warning("Index creation issue: %s", e)
@@ -93,13 +94,48 @@ async def get_db():
 
 
 send_limiter = asyncio.Semaphore(8)
-cached_llm_responses: dict[str, tuple[str, float]] = {}
-_cache_llm_ttl = 3600.0
-_pending_cleanup: Optional[asyncio.Task] = None
 
 
-def _register_cleanup_task():
-    pass
+def _hash_prompt(prompt: str) -> str:
+    return hashlib.sha256(prompt.encode()).hexdigest()
+
+
+async def cached_llm_reply(
+    prompt: str,
+    system_prompt: str = SALES_SYSTEM_PROMPT_BASE,
+    force_fresh: bool = False,
+) -> str:
+    db = await get_db()
+
+    if not force_fresh:
+        if re.search(r"06\d{8}", prompt) or re.search(
+            r"اشتري|نشتري|بغيت|حجز|احجز|طلب|نطلب|توكل|نتوكل|نقاد|غالي|تخفيض|نقص|نزل|السعر|شحال|prix|cher|réduction",
+            prompt
+        ):
+            force_fresh = True
+            logger.info("Force fresh LLM (transactional intent detected)")
+
+    if not force_fresh:
+        key = _hash_prompt(system_prompt + prompt)
+        cached = await db.llm_cache.find_one({"key": key})
+        if cached and cached.get("expires_at", datetime.min) > datetime.now(timezone.utc):
+            logger.info(f"Cache hit for key={key[:10]}...")
+            return cached["response"]
+
+    reply = generate_conversational_reply(prompt, system_prompt)
+    safe = sanitize_nim_response(reply)
+
+    key = _hash_prompt(system_prompt + prompt)
+    await db.llm_cache.update_one(
+        {"key": key},
+        {"$set": {
+            "key": key,
+            "response": safe,
+            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=15)
+        }},
+        upsert=True
+    )
+    return safe
 
 
 def _get_message_text(body: dict) -> str:
@@ -159,39 +195,6 @@ async def send_whatsapp(phone: str, message: str):
             logger.error("WhatsApp API error to %s: %s", phone, e.response.text[:300])
         except httpx.RequestError as e:
             logger.error("Network error sending to %s: %s", phone, e)
-
-
-async def cached_llm_reply(
-    prompt: str, system_prompt: str = SALES_SYSTEM_PROMPT_BASE
-) -> str:
-    cache_key = hashlib.sha256(f"{system_prompt[-100:]}|{prompt[-200:]}".encode()).hexdigest()
-    now = datetime.now(timezone.utc).timestamp()
-    cached = cached_llm_responses.get(cache_key)
-    if cached:
-        content, ts = cached
-        if now - ts < _cache_llm_ttl:
-            logger.info("LLM cache HIT for key=%s", cache_key[:8])
-            return content
-        del cached_llm_responses[cache_key]
-    try:
-        reply = await generate_conversational_reply(prompt, system_prompt)
-    except Exception as e:
-        logger.warning("LLM fallback on error: %s", e)
-        reply = "شكراً سيدي، طلبك وصل ونحن نتابعه مع الإدارة فوراً ✅"
-    sanitized = sanitize_nim_response(reply)
-    cached_llm_responses[cache_key] = (sanitized, now)
-    _evict_stale_cache()
-    return sanitized
-
-
-def _evict_stale_cache():
-    if len(cached_llm_responses) < 500:
-        return
-    now = datetime.now(timezone.utc).timestamp()
-    stale = [k for k, (_, ts) in cached_llm_responses.items() if now - ts > _cache_llm_ttl]
-    for k in stale:
-        del cached_llm_responses[k]
-    logger.info("Evicted %d stale cache entries", len(stale))
 
 
 async def get_or_create_session(phone: str, name: str) -> dict:

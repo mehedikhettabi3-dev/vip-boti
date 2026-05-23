@@ -15,7 +15,7 @@ async def startup():
 
 async def _followup_scheduler():
     while True:
-        await asyncio.sleep(7200)
+        await asyncio.sleep(14400)
         try:
             await check_and_send_followups()
         except Exception as e:

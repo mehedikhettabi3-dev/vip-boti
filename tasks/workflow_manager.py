@@ -78,18 +78,18 @@ async def process_incoming_message(phone, text):
 
 async def check_and_send_followups():
     try:
-        inactive_phones = await get_inactive_users_since(hours=2)
-        print(f"[FollowUp] Found {len(inactive_phones)} inactive users for 2h follow-up")
+        inactive_phones = await get_inactive_users_since(hours=8)
+        print(f"[FollowUp] Found {len(inactive_phones)} inactive users for 8h follow-up")
         for phone in inactive_phones:
             try:
                 msg = (
-                    "السلام عليكم سيدي، غير بغيت نتأكد واش نخلي ليك هاد النمرة "
-                    "ونحجزوها ليك دابا من المخزن حيت كاين عليها إقبال كبير اليوم، "
-                    "باش ما تضيعش منك هاد الهمزة؟ ✨🤝"
+                    "مبروك عواشرك سيدي، غبرتي علينا وعازينك! ✨ غير بغيت نتأكد واش مازال مهتم بهاد النمرة "
+                    "باش نحجزوها ليك ديريكت من المخزن ونثبتوها باسمك، حيت كيفما كتعرف هاد النماري VIP "
+                    "كيكون عليهم إقبال كبير ف هاد العواشر وخفنا تضيع منك الهمزة! 🤝 واش نتوكلو على الله؟"
                 )
                 WhatsAppAPI.send_text(phone, msg)
                 await save_message(phone, "bot", msg)
-                print(f"[FollowUp] 2h follow-up sent to {phone}")
+                print(f"[FollowUp] 8h follow-up sent to {phone}")
             except Exception as e:
                 print(f"[FollowUp] Error for {phone}: {e}")
     except Exception as e:

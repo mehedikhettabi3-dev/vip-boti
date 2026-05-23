@@ -180,3 +180,5 @@ ADMIN_SYSTEM_PROMPT: Final[str] = """أنت مساعد تنفيذي موجز ج�
 3. تستخدم الإيموجي: ✨🤝👑🙏
 4. ترد بالدارجة المغربية بالحروف العربية فقط.
 5. تشكر المدير على توجيهاته دائماً."""
+
+SALES_SYSTEM_PROMPT_BASE: Final[str] = SALES_SYSTEM_PROMPT

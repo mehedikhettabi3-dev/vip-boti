@@ -39,13 +39,6 @@ class WhatsAppAPI:
     @staticmethod
     def send_typing_indicator(phone, duration_seconds=4):
         try:
-            payload = {
-                "messaging_product": "whatsapp",
-                "to": phone,
-                "type": "text",
-                "text": {"body": ". . ."},
-            }
-            requests.post(META_API_URL, headers=WhatsAppAPI._headers(), json=payload, timeout=10)
             time.sleep(duration_seconds)
             return True
         except Exception as e:

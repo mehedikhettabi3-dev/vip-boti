@@ -9,7 +9,7 @@ from typing import Optional
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Query, Request, HTTPException
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from config import (
@@ -667,9 +667,9 @@ async def root():
 
 @app.get("/webhook")
 async def verify_webhook(
-    hub_mode: Optional[str] = None,
-    hub_verify_token: Optional[str] = None,
-    hub_challenge: Optional[str] = None,
+    hub_mode: Optional[str] = Query(None, alias="hub.mode"),
+    hub_verify_token: Optional[str] = Query(None, alias="hub.verify_token"),
+    hub_challenge: Optional[str] = Query(None, alias="hub.challenge"),
 ):
     if hub_mode == "subscribe" and hub_verify_token == WHATSAPP_VERIFY_TOKEN:
         logger.info("Webhook verified successfully.")

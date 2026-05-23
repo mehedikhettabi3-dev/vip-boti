@@ -1,9 +1,9 @@
 services:
   - type: web
     name: vip-boti
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     envVars:
       - key: NVIDIA_NIM_API_KEY
         fromEnv: NVIDIA_API_KEY
@@ -15,5 +15,7 @@ services:
         fromEnv: VERIFY_TOKEN
       - key: MONGO_URI
         fromEnv: MONGODB_URI
+      - key: MONGO_DB_NAME
+        value: vip_numbers_bot
       - key: ADMIN_PHONE
-        value: 212778375026
+        value: "212778375026"

@@ -91,6 +91,7 @@ async def init_db():
         db = mongo_client[MONGO_DB_NAME]
         await db.client_sessions.create_index("client_phone", unique=True)
         await db.llm_cache.create_index("expires_at", expireAfterSeconds=0)
+        await db.llm_cache.create_index("key", unique=True, sparse=True)
         await db.processed_messages.create_index("created_at", expireAfterSeconds=86400)
         await db.system_logs.create_index("created_at", expireAfterSeconds=7776000)
 

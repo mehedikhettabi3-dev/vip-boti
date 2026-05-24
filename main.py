@@ -5,12 +5,11 @@
 ╚════██║██║   ██║██╔═══╝ ██╔═══╝ ██╔══╝  ██║╚██╔╝██║██╔══╝
 ███████║╚██████╔╝██║     ██║     ███████╗██║ ╚═╝ ██║███████╗
 ╚══════╝ ╚═════╝ ╚═╝     ╚═╝     ╚══════╝╚═╝     ╚═╝╚══════╝
-WHATSAPP VIP BOT v5.0 – LIFESPAN, ATOMIC, ADMIN ALERT, MEDIA FALLBACK
+WHATSAPP VIP BOT v5.5 – ZERO CACHE, ADMIN ENDSWITH, LIVE LLM
 [DATABANK TRACE: CONFIRMED LIVE FACEBOOK MARKETPLACE CATALOG MERGE]
 """
 
 import asyncio
-import hashlib
 import logging
 import os
 import re
@@ -94,11 +93,13 @@ mongo_client: Optional[AsyncIOMotorClient] = None
 db = None
 http_client: Optional[httpx.AsyncClient] = None
 
+ADMIN_LOCAL = ADMIN_PHONE[-9:]
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global mongo_client, db, http_client
 
-    logger.info("Starting WhatsApp VIP Bot v5.0...")
+    logger.info("Starting WhatsApp VIP Bot v5.5 (Zero Cache)...")
 
     mongo_client = AsyncIOMotorClient(
         MONGO_URI,
@@ -112,14 +113,8 @@ async def lifespan(app: FastAPI):
     db = mongo_client[MONGO_DB_NAME]
 
     await db.client_sessions.create_index("client_phone", unique=True)
-    await db.llm_cache.create_index("expires_at", expireAfterSeconds=0)
     await db.processed_messages.create_index("created_at", expireAfterSeconds=86400)
     await db.system_logs.create_index("created_at", expireAfterSeconds=7776000)
-
-    stale = await db.llm_cache.delete_many(
-        {"response": {"$regex": "رمضان|تقسيط|أقساط"}}
-    )
-    logger.info(f"Purged {stale.deleted_count} stale cache entries")
 
     http_client = httpx.AsyncClient(
         timeout=httpx.Timeout(15.0, connect=5.0),
@@ -147,8 +142,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="WhatsApp VIP Bot v5.0",
-    version="5.0.0",
+    title="WhatsApp VIP Bot v5.5",
+    version="5.5.0",
     lifespan=lifespan,
 )
 
@@ -203,7 +198,7 @@ async def process_incoming(body: dict):
             })
             asyncio.create_task(mark_read(msg_id))
 
-            if sender == ADMIN_PHONE:
+            if sender.endswith(ADMIN_LOCAL):
                 await send_msg(sender, "تلقيت المرفق سيدي. تفضل بأمرك النصي.")
             else:
                 await send_msg(
@@ -230,7 +225,7 @@ async def process_incoming(body: dict):
 
         asyncio.create_task(mark_read(msg_id))
 
-        if sender == ADMIN_PHONE:
+        if sender.endswith(ADMIN_LOCAL):
             await handle_admin(sender, text)
             return
 
@@ -278,7 +273,7 @@ async def handle_admin(phone: str, msg: str):
         await send_msg(phone, clarification)
         return
 
-    reply = await cached_llm_reply(msg, ADMIN_SYSTEM_PROMPT)
+    reply = await get_live_llm_reply(msg, ADMIN_SYSTEM_PROMPT)
     lines = reply.strip().split("\n")
     if len(lines) > 2:
         reply = "\n".join(lines[:2])
@@ -329,7 +324,7 @@ async def handle_customer(phone: str, msg: str):
             "أنت مسؤول المبيعات الشخصي. رد على العميل بأنك إنسان مسؤول عن تنسيق الطلبات، "
             "ويمكنه الاتصال على 0778375026. لا تذكر كلمة بوت أبداً."
         )
-        reply = await cached_llm_reply(msg, bot_prompt)
+        reply = await get_live_llm_reply(msg, bot_prompt)
         await send_msg(phone, reply)
         return
 
@@ -367,7 +362,7 @@ async def handle_new(phone: str, session: dict, is_new_session: bool):
         "أنت بائع نمرات VIP. ابدأ بترحيب دافئ بالدارجة المغربية بمناسبة عيد الأضحى. "
         "أخبره بأنك ستتحقق من توفر الرقم الآن."
     )
-    welcome = await cached_llm_reply(welcome_prompt)
+    welcome = await get_live_llm_reply(welcome_prompt)
     await send_msg(phone, welcome)
 
     batch, _, _ = get_batch(0)
@@ -402,7 +397,7 @@ async def handle_active(phone: str, msg: str, intent: str, session: dict):
         if not batch:
             batch, _, _ = get_batch(0)
         batch_str = format_batch_message(batch)
-        llm_text = await cached_llm_reply(
+        llm_text = await get_live_llm_reply(
             "اكتب جملة واحدة بالدارجة تشجع العميل على مشاهدة التشكيلة الجديدة بمناسبة العيد.",
             SALES_SYSTEM_PROMPT_BASE,
         )
@@ -429,7 +424,7 @@ async def handle_active(phone: str, msg: str, intent: str, session: dict):
                 [f"• `{format_number_visually(a)}` \u2192 135 DH \u2B50" for a in alts]
             )
             prompt = f"\u0627\u0644\u0631\u0642\u0645 {clean_num} \u062A\u0645 \u0628\u064A\u0639\u0647. \u0627\u0633\u062A\u062E\u062F\u0645 \u0647\u0630\u0647 \u0627\u0644\u0645\u0642\u062F\u0645\u0629:\n{CROSS_SELL_HEADER}\n\n\u062B\u0645 \u0627\u0639\u0631\u0636 \u0647\u0630\u0647 \u0627\u0644\u0628\u062F\u0627\u0626\u0644:\n{alt_str}\n\n\u0648\u0627\u062E\u062A\u062A\u0645 \u0628\u0633\u0624\u0627\u0644 \u0648\u062F\u064A."
-            reply = await cached_llm_reply(prompt, force_fresh=True)
+            reply = await get_live_llm_reply(prompt)
             await send_msg(phone, reply)
             return
 
@@ -440,7 +435,7 @@ async def handle_active(phone: str, msg: str, intent: str, session: dict):
                 [f"• `{format_number_visually(a)}` \u2192 135 DH \u2B50" for a in alts]
             )
             prompt = f"\u0627\u0639\u062A\u0630\u0631 \u0628\u0644\u0637\u0641 \u0644\u0623\u0646 \u0627\u0644\u0631\u0642\u0645 \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F\u060C \u0648\u0627\u0639\u0631\u0636 \u0647\u0630\u0647 \u0627\u0644\u0628\u062F\u0627\u0626\u0644:\n{alt_str}"
-            reply = await cached_llm_reply(prompt, force_fresh=True)
+            reply = await get_live_llm_reply(prompt)
             await send_msg(phone, reply)
             return
 
@@ -450,7 +445,7 @@ async def handle_active(phone: str, msg: str, intent: str, session: dict):
             f"\u0647\u0630\u0627 \u0627\u0644\u0631\u0642\u0645 \u0645\u0646 \u0641\u0626\u0629 {cat_label}. \u0647\u0646\u0627\u0643 \u0637\u0644\u0628 \u0643\u0628\u064A\u0631 \u0639\u0644\u064A\u0647 \u0628\u0645\u0646\u0627\u0633\u0628\u0629 \u0639\u064A\u062F \u0627\u0644\u0623\u0636\u062D\u0649. "
             "\u0627\u0643\u062A\u0628 \u0631\u0633\u0627\u0644\u0629 \u0645\u0642\u0646\u0639\u0629 \u0628\u0627\u0644\u062F\u0627\u0631\u062C\u0629 \u062A\u0634\u062C\u0639\u0647 \u0639\u0644\u0649 \u0627\u0644\u062D\u062C\u0632 \u0641\u0648\u0631\u0627\u064B \u0628\u0645\u0646\u0627\u0633\u0628\u0629 \u0639\u064A\u062F \u0627\u0644\u0623\u0636\u062D\u0649 \u0627\u0644\u0643\u0628\u064A\u0631\u060C \u062F\u0648\u0646 \u062A\u062D\u062F\u064A\u062F \u0627\u0644\u0645\u0628\u0644\u063A."
         )
-        llm_response = await cached_llm_reply(persuasive_prompt, force_fresh=True)
+        llm_response = await get_live_llm_reply(persuasive_prompt)
 
         price_line = (
             f"\n\U0001f4b0 \u0627\u0644\u062B\u0645\u0646: *{price} \u062F\u0631\u0647\u0645*"
@@ -475,7 +470,7 @@ async def handle_active(phone: str, msg: str, intent: str, session: dict):
         if not interested:
             await send_msg(phone, "\u0648\u0627\u0634 \u062A\u0642\u062F\u0631 \u062A\u062D\u062F\u062F \u0644\u064A\u0627 \u0627\u0644\u0646\u0645\u0631\u0629 \u0627\u0644\u0644\u064A \u0639\u062C\u0628\u0627\u062A\u0643 \u0633\u064A\u062F\u064A\u061F \u0644\u0632\u0645\u0646\u064A\u0646\u064A \u064A\u0627\u062E\u0648\u064A \u0648\u0646\u0646\u062A\u0642\u0644\u0648\u0627 \u0644\u0644\u0645\u0637\u0644\u0648\u0628 \u0627\u0644\u062D\u0642\u064A\u0642\u064A \u0648\u0646\u063A\u0644\u0642\u0648\u0647\u0627 \u0628\u0633\u0631\u0639\u0629 \u0628\u0627\u0634 \u0645\u0627 \u062A\u0637\u064A\u062D\u0634 \u0645\u0646 \u0627\u0644\u0632\u0628\u0648\u0646 \u0627\u0644\u062B\u0627\u0646\u064A \u0627\u0644\u0644\u064A \u0645\u0627\u0632\u0627\u0644 \u064A\u062A\u0641\u0627\u0648\u0636 \u0639\u0644\u064A\u0647\u0627. \u0648\u0627\u0634 \u0646\u0628\u062F\u0627\u0648 \u0627\u0644\u0625\u062C\u0631\u0627\u0621\u0627\u062A \u062F\u0627\u0628\u0627\u061F \u064A\u0627 \u0633\u064A\u062F\u064A\u061F \u064A\u0627 \u0635\u0627\u062D\u0628\u064A\u061F")
             return
-        ask_name = await cached_llm_reply("\u0627\u0637\u0644\u0628 \u0645\u0646 \u0627\u0644\u0639\u0645\u064A\u0644 \u0627\u0644\u0627\u0633\u0645 \u0627\u0644\u0643\u0627\u0645\u0644 \u0628\u0623\u0633\u0644\u0648\u0628 \u0644\u0637\u064A\u0641 \u0628\u0627\u0644\u062F\u0627\u0631\u062C\u0629.", force_fresh=True)
+        ask_name = await get_live_llm_reply("\u0627\u0637\u0644\u0628 \u0645\u0646 \u0627\u0644\u0639\u0645\u064A\u0644 \u0627\u0644\u0627\u0633\u0645 \u0627\u0644\u0643\u0627\u0645\u0644 \u0628\u0623\u0633\u0644\u0648\u0628 \u0644\u0637\u064A\u0641 \u0628\u0627\u0644\u062F\u0627\u0631\u062C\u0629.")
         await send_msg(phone, ask_name)
         await db.client_sessions.update_one(
             {"client_phone": phone},
@@ -499,11 +494,11 @@ async def handle_active(phone: str, msg: str, intent: str, session: dict):
                 {"client_phone": phone},
                 {"$set": {"state": State.NEGOTIATING, "final_price": discounted}},
             )
-        reply = await cached_llm_reply(prompt, force_fresh=True)
+        reply = await get_live_llm_reply(prompt)
         await send_msg(phone, reply)
         return
 
-    reply = await cached_llm_reply(msg, SALES_SYSTEM_PROMPT_BASE)
+    reply = await get_live_llm_reply(msg, SALES_SYSTEM_PROMPT_BASE)
     await send_msg(phone, reply)
 
     await db.client_sessions.update_one(
@@ -537,7 +532,7 @@ async def collect_name(phone: str, msg: str, session: dict):
         }},
     )
     prompt = f"\u0627\u0634\u0643\u0631 \u0627\u0644\u0639\u0645\u064A\u0644 {name} \u0648\u0627\u0637\u0644\u0628 \u0645\u0646\u0647 \u0627\u0644\u0645\u062F\u064A\u0646\u0629 \u0628\u0644\u0637\u0641 \u0628\u0645\u0646\u0627\u0633\u0628\u0629 \u0627\u0644\u0639\u064A\u062F."
-    reply = await cached_llm_reply(prompt, force_fresh=True)
+    reply = await get_live_llm_reply(prompt)
     await send_msg(phone, reply)
 
 
@@ -592,7 +587,7 @@ async def retention_loop():
                 phone = eligible["client_phone"]
                 interested = eligible.get("interested_number", "\u0627\u0644\u0631\u0642\u0645 \u0627\u0644\u0645\u0645\u064A\u0632")
                 prompt = f"\u0627\u0644\u0639\u0645\u064A\u0644 \u0643\u0627\u0646 \u0645\u0647\u062A\u0645\u0627\u064B \u0628\u0640 {interested} \u0628\u0645\u0646\u0627\u0633\u0628\u0629 \u0639\u064A\u062F \u0627\u0644\u0623\u0636\u062D\u0649. \u0627\u0643\u062A\u0628 \u0631\u0633\u0627\u0644\u0629 \u0627\u0633\u062A\u0631\u062F\u0627\u062F \u0634\u062E\u0635\u064A\u0629 \u0628\u0627\u0644\u062F\u0627\u0631\u062C\u0629 \u062A\u0630\u0643\u0631\u0647 \u0628\u0623\u0646 \u0627\u0644\u0631\u0642\u0645 \u0642\u062F \u064A\u0636\u064A\u0639 \u0645\u0639 \u0632\u062D\u0627\u0645 \u0627\u0644\u0639\u064A\u062F."
-                followup = await cached_llm_reply(prompt, force_fresh=True)
+                followup = await get_live_llm_reply(prompt)
                 await send_msg(phone, followup)
                 logger.info(f"[RETENTION] Sent to {phone}")
         except Exception as e:
@@ -629,44 +624,9 @@ async def mark_read(msg_id: str):
         pass
 
 
-def _hash_prompt(prompt: str) -> str:
-    return hashlib.sha256(prompt.encode()).hexdigest()
-
-
-async def cached_llm_reply(
-    prompt: str,
-    system_prompt: str = SALES_SYSTEM_PROMPT_BASE,
-    force_fresh: bool = False,
-) -> str:
-    if not force_fresh:
-        clean_prompt = re.sub(r"\s+", "", prompt)
-        if re.search(r"0[67]\d{8}", clean_prompt) or re.search(
-            r"اشتري|نشتري|بغيت|حجز|احجز|طلب|نطلب|توكل|نتوكل|نقاد|غالي|تخفيض|نقص|نزل|السعر|شحال|prix|cher|réduction",
-            prompt,
-        ):
-            force_fresh = True
-            logger.info("Force fresh LLM (transactional intent detected)")
-
-    if not force_fresh:
-        key = _hash_prompt(system_prompt + prompt)
-        cached = await db.llm_cache.find_one({"key": key})
-        if cached and cached.get("expires_at", datetime.min) > datetime.now(timezone.utc):
-            return cached["response"]
-
+async def get_live_llm_reply(prompt: str, system_prompt: str = SALES_SYSTEM_PROMPT_BASE) -> str:
     reply = generate_conversational_reply(prompt, system_prompt)
-    safe = sanitize_nim_response(reply)
-
-    key = _hash_prompt(system_prompt + prompt)
-    await db.llm_cache.update_one(
-        {"key": key},
-        {"$set": {
-            "key": key,
-            "response": safe,
-            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=15),
-        }},
-        upsert=True,
-    )
-    return safe
+    return sanitize_nim_response(reply)
 
 
 def _classify_intent(msg: str, current_state: str) -> str:
@@ -699,7 +659,7 @@ async def health():
         db_status = "disconnected"
     return {
         "status": "running",
-        "version": "5.0.0",
+        "version": "5.5.0",
         "database": db_status,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
@@ -707,7 +667,7 @@ async def health():
 
 @app.get("/")
 async def root():
-    return {"status": "online", "service": "VIP Bot", "version": "5.0.0"}
+    return {"status": "online", "service": "VIP Bot", "version": "5.5.0"}
 
 
 if __name__ == "__main__":

@@ -27,24 +27,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-def _get_env(*names: str) -> str:
-    for n in names:
-        v = os.getenv(n)
-        if v:
-            return v
-    return ""
-
 CRITICAL_ENV = [
-    ("WHATSAPP_PHONE_NUMBER_ID", "META_PHONE_ID", "PHONE_NUMBER_ID"),
-    ("WHATSAPP_ACCESS_TOKEN", "META_TOKEN", "ACCESS_TOKEN"),
-    ("WHATSAPP_VERIFY_TOKEN", "VERIFY_TOKEN"),
-    ("MONGO_URI", "MONGODB_URI"),
-    ("ADMIN_PHONE",),
-    ("NVIDIA_NIM_API_KEY", "NVIDIA_API_KEY"),
+    "WHATSAPP_PHONE_NUMBER_ID",
+    "WHATSAPP_ACCESS_TOKEN",
+    "WHATSAPP_VERIFY_TOKEN",
+    "MONGO_URI",
+    "ADMIN_PHONE",
+    "NVIDIA_NIM_API_KEY",
 ]
-missing = [pair[0] for pair in CRITICAL_ENV if not _get_env(*pair)]
-if missing:
-    sys.exit(f"Missing critical env vars: {missing}")
+for var in CRITICAL_ENV:
+    if not os.getenv(var):
+        sys.exit(f"Missing critical env variable: {var}")
 
 from config import (
     WHATSAPP_VERIFY_TOKEN,
@@ -116,6 +109,8 @@ async def lifespan(app: FastAPI):
     await db.processed_messages.create_index("created_at", expireAfterSeconds=86400)
     await db.system_logs.create_index("created_at", expireAfterSeconds=7776000)
 
+    logger.info("MongoDB ready (no cache collections used)")
+
     http_client = httpx.AsyncClient(
         timeout=httpx.Timeout(15.0, connect=5.0),
         limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
@@ -123,9 +118,7 @@ async def lifespan(app: FastAPI):
 
     retention_task = asyncio.create_task(retention_loop())
 
-    logger.info("MongoDB pool ready, HTTPX pool ready, retention loop started")
     logger.info("[DATABANK TRACE: CONFIRMED LIVE FACEBOOK MARKETPLACE CATALOG MERGE]")
-
     yield
 
     logger.info("Shutting down...")
@@ -155,7 +148,6 @@ async def verify(
     hub_challenge: str = Query(default="", alias="hub.challenge"),
 ):
     if hub_mode == "subscribe" and hub_verify_token == WHATSAPP_VERIFY_TOKEN:
-        logger.info("Webhook verified")
         return PlainTextResponse(hub_challenge)
     raise HTTPException(403, "Verification failed")
 
@@ -166,6 +158,7 @@ async def webhook(request: Request):
         body = await request.json()
     except Exception:
         return JSONResponse({"status": "error"}, status_code=400)
+
     asyncio.create_task(process_incoming(body))
     return JSONResponse({"status": "ok"})
 
@@ -176,7 +169,6 @@ async def process_incoming(body: dict):
         changes = entry.get("changes", [{}])[0]
         value = changes.get("value", {})
         messages = value.get("messages", [])
-
         if not messages:
             return
 
@@ -187,7 +179,6 @@ async def process_incoming(body: dict):
         if msg_type != "text":
             raw_sender = msg.get("from", "")
             sender = re.sub(r"\D", "", raw_sender)
-            logger.info(f"[TRACE] Non-text ({msg_type}) from {sender}")
 
             already = await db.processed_messages.find_one({"msg_id": msg_id})
             if already:
@@ -199,12 +190,12 @@ async def process_incoming(body: dict):
             asyncio.create_task(mark_read(msg_id))
 
             if sender.endswith(ADMIN_LOCAL):
-                await send_msg(sender, "تلقيت المرفق سيدي. تفضل بأمرك النصي.")
+                await send_msg(sender, "✨ تلقيت المرفق سيدي. تفضل بأمرك النصي. 🙏")
             else:
                 await send_msg(
                     sender,
-                    "مرحبا بك سيدي العزيز ف نمرات VIP! بمناسبة العيد الكبير، "
-                    "أرسل لي رقم الهاتف اللّي عجبك من التشكيلة باش نحجزو ليك ف البلاصة! 🤝"
+                    "مرحبا بك سيدي العزيز فـ نمرات VIP! ✨🐏 بمناسبة العيد الكبير، "
+                    "أرسل لي رقم الهاتف اللّي عجبك من التشكيلة باش نحجزو ليك فـ البلاصة! 🤝"
                 )
             return
 
@@ -258,7 +249,7 @@ async def handle_admin(phone: str, msg: str):
             "number": number,
             "created_at": datetime.now(timezone.utc),
         })
-        await send_msg(phone, f"تم حذف {number} بنجاح سيدي. 🙏")
+        await send_msg(phone, f"✨ تم حذف {number} بنجاح سيدي. 🙏")
         return
 
     if re.search(
@@ -380,7 +371,7 @@ async def handle_new(phone: str, session: dict, is_new_session: bool):
 
     if is_new_session:
         alert = (
-            f"سيدي المهدي، كليان جديد دخل دابا للسيستيم ونظام الأتمتة صيفط ليه الفوج لول د النماري!\n"
+            f"🚨 سيدي المهدي، كليان جديد دخل دابا للسيستيم ونظام الأتمتة صيفط ليه الفوج لول د النماري!\n"
             f"النمرة: +{phone}"
         )
         await send_msg(ADMIN_PHONE, alert)
@@ -423,7 +414,10 @@ async def handle_active(phone: str, msg: str, intent: str, session: dict):
             alt_str = "\n".join(
                 [f"• `{format_number_visually(a)}` \u2192 135 DH \u2B50" for a in alts]
             )
-            prompt = f"\u0627\u0644\u0631\u0642\u0645 {clean_num} \u062A\u0645 \u0628\u064A\u0639\u0647. \u0627\u0633\u062A\u062E\u062F\u0645 \u0647\u0630\u0647 \u0627\u0644\u0645\u0642\u062F\u0645\u0629:\n{CROSS_SELL_HEADER}\n\n\u062B\u0645 \u0627\u0639\u0631\u0636 \u0647\u0630\u0647 \u0627\u0644\u0628\u062F\u0627\u0626\u0644:\n{alt_str}\n\n\u0648\u0627\u062E\u062A\u062A\u0645 \u0628\u0633\u0624\u0627\u0644 \u0648\u062F\u064A."
+            prompt = (
+                f"\u0627\u0644\u0631\u0642\u0645 {clean_num} \u062A\u0645 \u0628\u064A\u0639\u0647. \u0627\u0633\u062A\u062E\u062F\u0645 \u0647\u0630\u0647 \u0627\u0644\u0645\u0642\u062F\u0645\u0629:\n{CROSS_SELL_HEADER}\n\n"
+                f"\u062B\u0645 \u0627\u0639\u0631\u0636 \u0647\u0630\u0647 \u0627\u0644\u0628\u062F\u0627\u0626\u0644:\n{alt_str}\n\n\u0648\u0627\u062E\u062A\u062A\u0645 \u0628\u0633\u0624\u0627\u0644 \u0648\u062F\u064A."
+            )
             reply = await get_live_llm_reply(prompt)
             await send_msg(phone, reply)
             return
@@ -625,6 +619,9 @@ async def mark_read(msg_id: str):
 
 
 async def get_live_llm_reply(prompt: str, system_prompt: str = SALES_SYSTEM_PROMPT_BASE) -> str:
+    """
+    ALWAYS LIVE – no caching. Calls NVIDIA NIM directly and sanitizes output.
+    """
     reply = generate_conversational_reply(prompt, system_prompt)
     return sanitize_nim_response(reply)
 

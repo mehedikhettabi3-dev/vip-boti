@@ -28,6 +28,8 @@ VERIFY_TOKEN    = os.environ.get("VERIFY_TOKEN", "vip_sales_secure_2026")
 ADMIN_PHONE     = "".join(filter(str.isdigit, os.environ.get("ADMIN_PHONE", "212778375026")))
 NVIDIA_API_KEY  = os.environ.get("NVIDIA_API_KEY", "")
 GROQ_API_KEY    = os.environ.get("GROQ_API_KEY", "")
+GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 MONGODB_URI     = os.environ.get("MONGODB_URI") or os.environ.get("MONGO_URI", "")
 MONGO_DB_NAME   = os.environ.get("MONGO_DB_NAME", "vip_numbers_bot")
 SERVICE_URL     = os.environ.get("CATALOG_URL", "https://vip-boti.onrender.com").rstrip("/")
@@ -335,14 +337,51 @@ NESSRINE_SYSTEM = """أنتِ نسرين، خبيرة مبيعات محترفة 
 ⚡ ردودكِ: قصيرة (1-3 جمل). مؤثرة. إيموجي طبيعية. لا حشو."""
 
 
-def _build_messages(sender, user_msg, session):
+def format_vip_number(number_str):
+    """Formats phone numbers by grouping and bolding repeating digits (3 or 4 of them)"""
+    digits = "".join(filter(str.isdigit, number_str))
+    if len(digits) != 10:
+        return number_str
+    
+    # Check 4 repeating digits first
+    for i in range(2, 7):
+        block = digits[i:i+4]
+        if len(set(block)) == 1:
+            prefix = digits[:i]
+            suffix = digits[i+4:]
+            pref_fmt = " ".join(prefix[j:j+2] for j in range(0, len(prefix), 2))
+            suff_fmt = " ".join(suffix[j:j+2] for j in range(0, len(suffix), 2))
+            return f"{pref_fmt} *{block}* {suff_fmt}".strip()
+            
+    # Check 3 repeating digits
+    for i in range(2, 8):
+        block = digits[i:i+3]
+        if len(set(block)) == 1:
+            prefix = digits[:i]
+            suffix = digits[i+3:]
+            pref_fmt = " ".join(prefix[j:j+2] for j in range(0, len(prefix), 2))
+            suff_fmt = " ".join(suffix[j:j+2] for j in range(0, len(suffix), 2))
+            return f"{pref_fmt} *{block}* {suff_fmt}".strip()
+            
+    return f"{digits[:2]} {digits[2:4]} {digits[4:6]} {digits[6:8]} {digits[8:]}"
+
+
+def get_catalog_prompt_text():
+    """Generates a text list of all available numbers grouped by tier for the LLM"""
     catalog = load_catalog()
-    tier_summary = " | ".join(
-        f"{tier}({len([i for i in items if i.get('status','available')=='available'])} متوفر بـ"
-        f"{'150' if tier=='Diamond' else '135' if tier=='Gold' else '100'}دh)"
-        for tier, items in catalog.items()
-    )
-    system = NESSRINE_SYSTEM + f"\n\n📦 الكتالوج الحالي: {tier_summary}"
+    lines = []
+    for tier, items in catalog.items():
+        avail = [i for i in items if i.get("status", "available") == "available"]
+        if not avail: continue
+        price = "150" if tier == "Diamond" else "135" if tier == "Gold" else "100"
+        lines.append(f"📌 فئة {tier} (الثمن: {price} DH):")
+        for item in avail:
+            lines.append(f"   - {format_vip_number(item['number'])}")
+    return "\n".join(lines)
+
+
+def _build_messages(sender, user_msg, session):
+    system = NESSRINE_SYSTEM + f"\n\n📋 أرقام الكتالوج المتوفرة حالياً للبيع (ممنوع منعاً باتاً اختراع أي رقم آخر غير موجود في هذه القائمة):\n{get_catalog_prompt_text()}"
 
     messages = [{"role": "system", "content": system}]
 
@@ -378,6 +417,58 @@ def ask_nvidia(messages):
     return None
 
 
+def ask_gemini(messages):
+    if not GEMINI_API_KEY: return None
+    try:
+        system_prompt = ""
+        contents = []
+        for m in messages:
+            role = m["role"]
+            content = m["content"]
+            if role == "system":
+                system_prompt = content
+            elif role == "user":
+                contents.append({
+                    "role": "user",
+                    "parts": [{"text": content}]
+                })
+            elif role == "assistant":
+                contents.append({
+                    "role": "model",
+                    "parts": [{"text": content}]
+                })
+                
+        payload = {"contents": contents}
+        if system_prompt:
+            payload["systemInstruction"] = {
+                "parts": [{"text": system_prompt}]
+            }
+        payload["generationConfig"] = {
+            "temperature": 0.75,
+            "maxOutputTokens": 1000
+        }
+        
+        r = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}",
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=20
+        )
+        if r.status_code == 200:
+            res_data = r.json()
+            try:
+                candidate = res_data["candidates"][0]
+                part = candidate["content"]["parts"][0]
+                return part["text"].strip()
+            except KeyError:
+                logging.warning(f"[GEMINI] Unexpected response structure: {res_data}")
+        else:
+            logging.warning(f"[GEMINI] {r.status_code}: {r.text[:200]}")
+    except Exception as e:
+        logging.error(f"[GEMINI ERROR] {e}")
+    return None
+
+
 def ask_groq(messages):
     if not GROQ_API_KEY: return None
     try:
@@ -400,17 +491,57 @@ def ask_groq(messages):
     return None
 
 
+def ask_openrouter(messages):
+    if not OPENROUTER_API_KEY: return None
+    try:
+        r = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://vip-boti.onrender.com",
+                "X-Title": "VIP Numbers Bot"
+            },
+            json={
+                "model": "meta-llama/llama-3.3-70b-instruct",
+                "messages": messages,
+                "temperature": 0.75,
+                "max_tokens": 1000
+            },
+            timeout=20
+        )
+        if r.status_code == 200:
+            return r.json()["choices"][0]["message"]["content"].strip()
+        logging.warning(f"[OPENROUTER] {r.status_code}: {r.text[:200]}")
+    except Exception as e:
+        logging.error(f"[OPENROUTER ERROR] {e}")
+    return None
+
+
 def nessrine_reply(sender, user_msg, session):
-    """Primary: NVIDIA NIM (2000 tokens) → Fallback: Groq → None"""
+    """Primary: NVIDIA NIM -> Fallback: Gemini -> Fallback: Groq -> Fallback: OpenRouter"""
     msgs = _build_messages(sender, user_msg, session)
+    
     reply = ask_nvidia(msgs)
     if reply:
         logging.info(f"[AI:NVIDIA] ✅ replied for {sender}")
         return reply
+        
+    reply = ask_gemini(msgs)
+    if reply:
+        logging.info(f"[AI:GEMINI] ✅ fallback for {sender}")
+        return reply
+        
     reply = ask_groq(msgs)
     if reply:
         logging.info(f"[AI:GROQ] ✅ fallback for {sender}")
         return reply
+        
+    reply = ask_openrouter(msgs)
+    if reply:
+        logging.info(f"[AI:OPENROUTER] ✅ fallback for {sender}")
+        return reply
+        
     logging.warning(f"[AI] All engines failed for {sender}")
     return None
 
@@ -503,51 +634,99 @@ def run_order_flow(sender, text, session):
 # ============================================================
 # CATALOG IMAGE SENDING
 # ============================================================
-TIER_CONFIG = [
-    ("Diamond", "💎 *أرقام SUPER VIP — 150 درهم*\nأرقام متكررة رباعية ونادرة ⭐"),
-    ("Gold",    "⭐ *أرقام VIP مميزة — 135 درهم*\nأرقام ثلاثية التكرار ومطلوبة 🔥"),
-    ("Silver",  "✨ *أرقام VIP — 100 درهم*\nأرقام جميلة بثمن مناسب 💫"),
-]
-
-
-def send_catalog_images(sender):
-    """Send catalog images (one per tier) with number lists in caption"""
-    catalog   = load_catalog()
-    sent_any  = False
-
-    for tier, caption_header in TIER_CONFIG:
-        items   = catalog.get(tier, [])
-        avail   = [i for i in items if i.get("status", "available") == "available"]
-        if not avail: continue
-
-        nums_txt = "\n".join(f"  📱 {i['number']}" for i in avail[:10])
-        full_cap = f"{caption_header}\n\n{nums_txt}\n\n✅ الدفع عند الاستلام | 🇲🇦 التوصيل لجميع المدن"
-        img_url  = CATALOG_IMAGES.get(tier)
-
-        if img_url:
-            ok = send_image(sender, img_url, full_cap)
-            if not ok:
-                send_text(sender, full_cap)
-        else:
-            send_text(sender, full_cap)
-
-        sent_any = True
-        time.sleep(0.8)
-
-    if sent_any:
-        time.sleep(0.5)
-        send_text(sender,
-            "📌 صيفط ليا الرقم اللي عجبك وغنكمل معك الطلب في ثوانٍ! 🚀\n"
-            "الدفع عند الاستلام ✅ — ما كتخلص حتى تشد الرقم فيدك 🤝"
+def send_catalog_step(sender, _):
+    # Reload fresh session inside thread to prevent race conditions
+    session = load_session(sender)
+    catalog = load_catalog()
+    state = session.get("catalog_state", "gold_first")
+    
+    diamond_nums = [i for i in catalog.get("Diamond", []) if i.get("status", "available") == "available"]
+    gold_nums    = [i for i in catalog.get("Gold", [])    if i.get("status", "available") == "available"]
+    silver_nums  = [i for i in catalog.get("Silver", [])  if i.get("status", "available") == "available"]
+    
+    if state == "gold_first":
+        img_url = CATALOG_IMAGES.get("Gold")
+        nums_txt = "\n".join(f"  📱 {format_vip_number(i['number'])}" for i in gold_nums[:10])
+        caption = (
+            "⭐ *أرقام مميزة الـ Gold — 135 DH*\n"
+            "أرقام ثلاثية التكرار ومطلوبة جداً 🔥:\n\n"
+            f"{nums_txt}\n\n"
+            "✅ الدفع عند الاستلام | 🇲🇦 التوصيل لجميع المدن\n\n"
+            "🔹 صيفط *المزيد* باش تشوف باقي أرقام 135 درهم.\n"
+            "🔹 صيفط *الفئات الأخرى* باش تشوف أرقام 100 درهم و 150 درهم."
         )
-    else:
-        send_text(sender, "⚠️ الكتالوج فارغ حالياً. تواصل معنا مباشرة على 07 78 37 50 26 📞")
+        if img_url:
+            send_image(sender, img_url, caption)
+        else:
+            send_text(sender, caption)
+            
+        session["catalog_state"] = "gold_rest"
+        save_session(sender, session)
+        
+    elif state == "gold_rest":
+        remaining = gold_nums[10:]
+        if remaining:
+            nums_txt = "\n".join(f"  📱 {format_vip_number(i['number'])}" for i in remaining)
+            msg = (
+                "⭐ *باقي أرقام الـ Gold مميزة — 135 DH*:\n\n"
+                f"{nums_txt}\n\n"
+                "🔹 صيفط *الكل* باش نصيفط ليك أرقام الفئات الأخرى (100 درهم و 150 درهم)."
+            )
+            send_text(sender, msg)
+        else:
+            send_text(sender, "هادو هما الأرقام المتوفرة ففئة 135 درهم حالياً.\n\nصيفط *الكل* باش نصيفط ليك أرقام الفئات الأخرى (100 درهم و 150 درهم).")
+            
+        session["catalog_state"] = "silver_diamond"
+        save_session(sender, session)
+        
+    elif state == "silver_diamond":
+        if silver_nums:
+            img_url = CATALOG_IMAGES.get("Silver")
+            nums_txt = "\n".join(f"  📱 {format_vip_number(i['number'])}" for i in silver_nums[:12])
+            caption = (
+                "✨ *أرقام مميزة الـ Silver — 100 DH*\n"
+                "أرقام جميلة بثمن مناسب جداً 💫:\n\n"
+                f"{nums_txt}\n\n"
+                "✅ الدفع عند الاستلام | 🇲🇦 التوصيل لجميع المدن"
+            )
+            if img_url:
+                send_image(sender, img_url, caption)
+                time.sleep(0.8)
+            else:
+                send_text(sender, caption)
+                time.sleep(0.5)
+                
+            if len(silver_nums) > 12:
+                rest_txt = "\n".join(f"  📱 {format_vip_number(i['number'])}" for i in silver_nums[12:])
+                send_text(sender, f"✨ *باقي أرقام الـ Silver — 100 DH*:\n\n{rest_txt}")
+                time.sleep(0.8)
+                
+        if diamond_nums:
+            img_url = CATALOG_IMAGES.get("Diamond")
+            nums_txt = "\n".join(f"  📱 {format_vip_number(i['number'])}" for i in diamond_nums[:12])
+            caption = (
+                "💎 *أرقام مميزة الـ Diamond — 150 DH*\n"
+                "أرقام SUPER VIP مكررة رباعية ونادرة 👑:\n\n"
+                f"{nums_txt}\n\n"
+                "✅ الدفع عند الاستلام | 🇲🇦 التوصيل لجميع المدن"
+            )
+            if img_url:
+                send_image(sender, img_url, caption)
+            else:
+                send_text(sender, caption)
+                
+        session.pop("catalog_state", None)
+        save_session(sender, session)
+        
+        time.sleep(0.5)
+        send_text(sender, "✍️ صيفط ليا الرقم اللي عجبك باش نوجدو الطلب ديالك فالحين!")
 
 # ============================================================
 # FAST INTENT (no AI, instant routing)
 # ============================================================
 _RE_CATALOG  = re.compile(r'\b(نوامر|أرقام|ارقام|كتالوج|catalog|catalogue|nwamer|nwamar|nmari|'
                            r'liste|warini|عرض|ورينا|واش\s*كاين|الجديد|les\s*num|show\s*me)\b', re.I)
+_RE_CATALOG_MORE = re.compile(r'\b(المزيد|باقي|الآخرين|الاخرين|more|all|الكل|الفئات|others|other|suiv|suivant)\b', re.I)
 _RE_GREETING = re.compile(r'\b(سلام|السلام|مرحبا|أهلا|اهلا|hi|hello|bonjour|salut|salam|slm|hey|cv|labas)\b', re.I)
 _RE_PRICE    = re.compile(r'\b(ثمن|بشحال|prix|price|combien|شحال|thaman|bch7al)\b', re.I)
 _RE_TRUST    = re.compile(r'\b(مضمون|serious|sérieux|arnaque|ثقة|واش\s*حقيقي|legit|bsa7)\b', re.I)
@@ -557,7 +736,7 @@ _RE_THANKS   = re.compile(r'\b(شكرا|شكراً|merci|thanks|choukran|mrc)\b'
 
 def quick_intent(text):
     t = text.strip()
-    if _RE_CATALOG.search(t):  return "catalog"
+    if _RE_CATALOG.search(t) or _RE_CATALOG_MORE.search(t):  return "catalog"
     if _RE_PRICE.search(t):    return "price"
     if _RE_TRUST.search(t):    return "trust"
     if _RE_DELIVERY.search(t): return "delivery"
@@ -795,8 +974,8 @@ def handle_logic(sender, text):
         intent = quick_intent(raw)
 
         if intent == "catalog":
-            executor.submit(send_catalog_images, sender)
-            return None  # Images sent by send_catalog_images
+            executor.submit(send_catalog_step, sender, session)
+            return None  # Images sent by send_catalog_step
 
         # ── NESSRINE AI REPLY ─────────────────────────────────
         ai_reply = nessrine_reply(sender, raw, session)
@@ -865,6 +1044,7 @@ def webhook():
     # ── POST: Incoming message ──
     try:
         data = request.get_json(force=True, silent=True)
+        logging.info(f"📥 [WEBHOOK RAW] {str(data)[:300]}...")
         if not data or "entry" not in data:
             return "ok", 200
 

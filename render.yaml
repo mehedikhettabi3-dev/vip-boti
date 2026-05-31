@@ -4,7 +4,7 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn whatsapp_bot:app -w 2 --timeout 60 --bind 0.0.0.0:$PORT
+    startCommand: gunicorn app:app -w 2 --timeout 60 --bind 0.0.0.0:$PORT
     envVars:
       - key: PORT
         value: 10000
@@ -18,9 +18,11 @@ services:
         value: vip_bot_2026
       - key: ADMIN_PHONE
         sync: false
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: PINECONE_API_KEY
+        sync: false
+      - key: PINECONE_INDEX
+        value: vip-numbers-knowledge
       - key: CATALOG_URL
         value: https://vip-boti.onrender.com
-      - key: DASHBOARD_USER
-        sync: false
-      - key: DASHBOARD_PASS
-        sync: false

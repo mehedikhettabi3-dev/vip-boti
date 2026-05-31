@@ -16,7 +16,7 @@ if sys.stdout and sys.stdout.encoding != 'utf-8':
         pass
 
 # Import the Flask app
-from whatsapp_bot import app
+from app import app
 
 if __name__ == "__main__":
     app.run()

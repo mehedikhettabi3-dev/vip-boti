@@ -112,7 +112,7 @@ def _fsave(path, data):
 
 def load_session(sender):
     db = get_db()
-    if db:
+    if db is not None:
         try:
             doc = db.sessions.find_one({"sender": sender})
             if doc:
@@ -125,7 +125,7 @@ def load_session(sender):
 
 def save_session(sender, data):
     db = get_db()
-    if db:
+    if db is not None:
         try:
             db.sessions.update_one(
                 {"sender": sender},
@@ -141,7 +141,7 @@ def save_session(sender, data):
 
 def delete_session(sender):
     db = get_db()
-    if db:
+    if db is not None:
         try:
             db.sessions.delete_one({"sender": sender})
             return
@@ -152,7 +152,7 @@ def delete_session(sender):
 
 def is_known_lead(sender):
     db = get_db()
-    if db:
+    if db is not None:
         try:
             return db.leads.find_one({"sender": sender}) is not None
         except Exception: pass
@@ -160,7 +160,7 @@ def is_known_lead(sender):
 
 def save_lead(sender, first_msg=""):
     db = get_db()
-    if db:
+    if db is not None:
         try:
             db.leads.update_one(
                 {"sender": sender},
@@ -175,7 +175,7 @@ def save_lead(sender, first_msg=""):
 
 def save_order(order):
     db = get_db()
-    if db:
+    if db is not None:
         try:
             db.orders.insert_one(order)
             return
@@ -186,7 +186,7 @@ def save_order(order):
 
 def get_stats():
     db = get_db()
-    if db:
+    if db is not None:
         try:
             return {
                 "leads":    db.leads.count_documents({}),
@@ -644,7 +644,7 @@ def handle_admin(sender, text):
 
     if cmd == "!reset":
         db = get_db()
-        if db:
+        if db is not None:
             try: db.sessions.delete_many({})
             except Exception: pass
         _fsave(SESSIONS_FILE, {})
@@ -841,7 +841,7 @@ def health():
     return jsonify({
         "status":  "ok",
         "agent":   "Nessrine v8.0",
-        "mongodb": "connected" if db else "file-fallback",
+        "mongodb": "connected" if db is not None else "file-fallback",
         "nvidia":  "configured" if NVIDIA_API_KEY else "missing",
         "groq":    "configured" if GROQ_API_KEY else "missing",
         "keep_alive": True,

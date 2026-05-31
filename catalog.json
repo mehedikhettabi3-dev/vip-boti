@@ -1,223 +1,50 @@
 {
   "Diamond": [
-    {
-      "number": "06 99 36 66 62",
-      "price": "200 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 14 44 49 47",
-      "price": "200 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 20 86 88 88",
-      "price": "200 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 11 11 93 74",
-      "price": "200 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 13 33 39 88",
-      "price": "200 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 03 34 44 40",
-      "price": "200 DH",
-      "status": "available"
-    },
-    {
-      "number": "06 38 78 88 81",
-      "price": "200 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 17 22 22 32",
-      "price": "200 DH",
-      "status": "available"
-    },
-    {
-      "number": "06 05 55 51 18",
-      "price": "200 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 12 11 12 28",
-      "price": "200 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 22 20 20 01",
-      "price": "200 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 05 66 61 61",
-      "price": "200 DH",
-      "status": "available"
-    },
-    {
-      "number": "06 00 20 50 12",
-      "price": "200 DH",
-      "status": "available"
-    }
+    {"number": "07 13 33 39 88", "price": "150 DH", "status": "available"},
+    {"number": "06 99 36 66 62", "price": "150 DH", "status": "available"},
+    {"number": "07 03 34 44 40", "price": "150 DH", "status": "available"},
+    {"number": "07 17 22 22 32", "price": "150 DH", "status": "available"},
+    {"number": "07 20 86 88 88", "price": "150 DH", "status": "available"},
+    {"number": "07 11 11 93 74", "price": "150 DH", "status": "available"},
+    {"number": "07 14 44 49 47", "price": "150 DH", "status": "available"},
+    {"number": "06 38 78 88 81", "price": "150 DH", "status": "available"},
+    {"number": "07 22 20 20 01", "price": "150 DH", "status": "available"},
+    {"number": "07 12 11 12 28", "price": "150 DH", "status": "available"},
+    {"number": "07 05 66 61 61", "price": "150 DH", "status": "available"},
+    {"number": "06 00 20 50 12", "price": "150 DH", "status": "available"}
   ],
   "Gold": [
-    {
-      "number": "06 29 01 11 13",
-      "price": "150 DH",
-      "status": "available"
-    },
-    {
-      "number": "06 29 94 44 41",
-      "price": "150 DH",
-      "status": "available"
-    },
-    {
-      "number": "06 87 77 79 50",
-      "price": "150 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 17 58 88 87",
-      "price": "150 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 24 44 41 97",
-      "price": "150 DH",
-      "status": "available"
-    },
-    {
-      "number": "06 01 11 10 40",
-      "price": "150 DH",
-      "status": "available"
-    },
-    {
-      "number": "06 00 50 20 38",
-      "price": "150 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 07 66 63 69",
-      "price": "150 DH",
-      "status": "available"
-    },
-    {
-      "number": "06 30 33 38 18",
-      "price": "150 DH",
-      "status": "available"
-    },
-    {
-      "number": "06 34 34 67 57",
-      "price": "150 DH",
-      "status": "available"
-    }
+    {"number": "06 29 94 44 41", "price": "135 DH", "status": "available"},
+    {"number": "06 87 77 79 50", "price": "135 DH", "status": "available"},
+    {"number": "07 24 44 41 97", "price": "135 DH", "status": "available"},
+    {"number": "06 01 11 10 40", "price": "135 DH", "status": "available"},
+    {"number": "07 17 58 88 87", "price": "135 DH", "status": "available"},
+    {"number": "06 29 01 11 13", "price": "135 DH", "status": "available"},
+    {"number": "07 07 66 63 69", "price": "135 DH", "status": "available"},
+    {"number": "06 30 33 38 18", "price": "135 DH", "status": "available"},
+    {"number": "06 00 50 20 38", "price": "135 DH", "status": "available"},
+    {"number": "06 34 34 67 57", "price": "135 DH", "status": "available"}
   ],
   "Silver": [
-    {
-      "number": "06 34 38 33 73",
-      "price": "100 DH",
-      "status": "available"
-    },
-    {
-      "number": "06 09 39 01 07",
-      "price": "100 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 06 06 36 79",
-      "price": "100 DH",
-      "status": "available"
-    },
-    {
-      "number": "06 04 03 89 84",
-      "price": "100 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 05 05 76 81",
-      "price": "100 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 03 22 06 00",
-      "price": "100 DH",
-      "status": "available"
-    },
-    {
-      "number": "06 07 03 13 11",
-      "price": "100 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 24 01 23 01",
-      "price": "100 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 05 11 19 13",
-      "price": "100 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 20 05 07 44",
-      "price": "100 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 05 70 74 08",
-      "price": "100 DH",
-      "status": "available"
-    },
-    {
-      "number": "06 02 44 01 11",
-      "price": "100 DH",
-      "status": "available"
-    },
-    {
-      "number": "06 35 38 28 35",
-      "price": "100 DH",
-      "status": "available"
-    },
-    {
-      "number": "06 99 46 46 49",
-      "price": "100 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 10 14 44 48",
-      "price": "100 DH",
-      "status": "available"
-    },
-    {
-      "number": "06 33 37 42 84",
-      "price": "100 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 03 33 81 35",
-      "price": "100 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 20 43 20 59",
-      "price": "100 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 16 34 94 44",
-      "price": "100 DH",
-      "status": "available"
-    },
-    {
-      "number": "07 25 88 33 03",
-      "price": "100 DH",
-      "status": "available"
-    }
+    {"number": "07 10 14 44 48", "price": "100 DH", "status": "available"},
+    {"number": "06 02 44 01 11", "price": "100 DH", "status": "available"},
+    {"number": "07 16 34 94 44", "price": "100 DH", "status": "available"},
+    {"number": "07 03 33 81 35", "price": "100 DH", "status": "available"},
+    {"number": "07 05 11 19 13", "price": "100 DH", "status": "available"},
+    {"number": "06 33 37 42 84", "price": "100 DH", "status": "available"},
+    {"number": "07 03 22 06 00", "price": "100 DH", "status": "available"},
+    {"number": "07 25 88 33 03", "price": "100 DH", "status": "available"},
+    {"number": "07 20 05 07 44", "price": "100 DH", "status": "available"},
+    {"number": "06 99 46 46 49", "price": "100 DH", "status": "available"},
+    {"number": "06 34 38 33 73", "price": "100 DH", "status": "available"},
+    {"number": "06 07 03 13 11", "price": "100 DH", "status": "available"},
+    {"number": "07 06 06 36 79", "price": "100 DH", "status": "available"},
+    {"number": "07 05 05 76 81", "price": "100 DH", "status": "available"},
+    {"number": "06 35 38 28 35", "price": "100 DH", "status": "available"},
+    {"number": "07 24 01 23 01", "price": "100 DH", "status": "available"},
+    {"number": "07 20 43 20 59", "price": "100 DH", "status": "available"},
+    {"number": "07 05 70 74 08", "price": "100 DH", "status": "available"},
+    {"number": "06 04 03 89 84", "price": "100 DH", "status": "available"},
+    {"number": "06 09 39 01 07", "price": "100 DH", "status": "available"}
   ]
 }

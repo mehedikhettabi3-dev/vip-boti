@@ -1,12 +1,17 @@
-import os, sys, json, logging, random, re, requests, threading, functools, html, time, atexit
+"""
+VIP Numbers Morocco — WhatsApp Bot v8.0
+Agent: Nessrine | Experte Ventes 40 ans | AR / FR / EN
+Architecture: NVIDIA NIM 2000 tokens + MongoDB + Self-Ping + Image Catalog
+"""
+
+import os, sys, re, json, logging, threading, random, time, requests
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
-from flask import Flask, request, jsonify, send_file, Response, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
-from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
-from urllib.parse import quote
+from dotenv import load_dotenv
 
 load_dotenv()
 try:
@@ -15,782 +20,954 @@ try:
 except Exception: pass
 
 # ============================================================
-# 🔑  CONFIG
+# CONFIG
 # ============================================================
-def get_config():
-    try:
-        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "api_keys.json")
-        if os.path.exists(p):
-            with open(p, "r", encoding="utf-8") as f: return json.load(f)
-    except Exception: pass
-    return {}
+ACCESS_TOKEN    = os.environ.get("ACCESS_TOKEN", "")
+PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "")
+VERIFY_TOKEN    = os.environ.get("VERIFY_TOKEN", "vip_sales_secure_2026")
+ADMIN_PHONE     = "".join(filter(str.isdigit, os.environ.get("ADMIN_PHONE", "212778375026")))
+NVIDIA_API_KEY  = os.environ.get("NVIDIA_API_KEY", "")
+GROQ_API_KEY    = os.environ.get("GROQ_API_KEY", "")
+MONGODB_URI     = os.environ.get("MONGODB_URI") or os.environ.get("MONGO_URI", "")
+MONGO_DB_NAME   = os.environ.get("MONGO_DB_NAME", "vip_numbers_bot")
+SERVICE_URL     = os.environ.get("CATALOG_URL", "https://vip-boti.onrender.com").rstrip("/")
+META_API_URL    = f"https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages"
 
-CFG = get_config()
-
-def _digits_only(s):
-    return "".join(filter(str.isdigit, str(s or "")))
-
-def normalize_whatsapp_phone(raw):
-    """Digits-only id for Cloud API (Morocco: 212…)."""
-    d = _digits_only(raw)
-    if not d:
-        return ""
-    if d.startswith("212"):
-        return d
-    if d.startswith("0") and len(d) >= 10:
-        return "212" + d[1:]
-    if len(d) == 9:
-        return "212" + d
-    return d
-
-ACCESS_TOKEN    = os.environ.get("ACCESS_TOKEN") or CFG.get("ACCESS_TOKEN", "")
-PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID") or CFG.get("PHONE_NUMBER_ID", "")
-VERIFY_TOKEN    = os.environ.get("VERIFY_TOKEN") or CFG.get("VERIFY_TOKEN", "vip_bot_2026")
-ADMIN_PHONE     = normalize_whatsapp_phone(os.environ.get("ADMIN_PHONE") or CFG.get("ADMIN_PHONE", "212625489153"))
-_default_catalog = "https://vip-boti.onrender.com"
-CATALOG_URL     = (os.environ.get("CATALOG_URL") or CFG.get("CATALOG_URL") or _default_catalog).rstrip("/")
-DASHBOARD_USER  = os.environ.get("DASHBOARD_USER") or CFG.get("DASHBOARD_USER", "admin")
-DASHBOARD_PASS  = os.environ.get("DASHBOARD_PASS") or CFG.get("DASHBOARD_PASS", "vip2026")
-API_URL = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
+# Error fallback message (sent when bot crashes)
+ERROR_FALLBACK = (
+    "السلام عليكم 👋\n\n"
+    "بسبب كثرة الرسائل حالياً، نعتذر عن وجود عطل تقني مؤقت.\n\n"
+    "يمكنكم التواصل مباشرة على الرقم:\n"
+    "📞 *07 78 37 50 26*\n\n"
+    "وسنرد عليكم في أقرب وقت ممكن. شكراً على تفهمكم 🙏"
+)
 
 # ============================================================
-# 📋  LOGGING
+# LOGGING
 # ============================================================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-_log_path = os.path.join(BASE_DIR, "log.txt")
-_fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-_sh = logging.StreamHandler()
-_sh.setFormatter(_fmt)
-_rh = RotatingFileHandler(_log_path, maxBytes=2*1024*1024, backupCount=3, encoding="utf-8")
-_rh.setFormatter(_fmt)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", handlers=[_sh, _rh])
+BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
+_log_path = os.path.join(BASE_DIR, "app.log")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        RotatingFileHandler(_log_path, maxBytes=2*1024*1024, backupCount=3, encoding="utf-8")
+    ]
+)
 
-if not ACCESS_TOKEN or not PHONE_NUMBER_ID:
-    logging.warning("⚠️ [CONFIG] ACCESS_TOKEN or PHONE_NUMBER_ID missing — outbound WhatsApp will fail until set in environment or api_keys.json (local).")
-
-app = Flask(__name__, static_folder='dist', static_url_path='')
+app      = Flask(__name__, static_folder="static", static_url_path="/static")
 CORS(app)
+executor = ThreadPoolExecutor(max_workers=8)
+_lock    = threading.Lock()
+processed_ids = OrderedDict()
 
 # ============================================================
-# 📂  DATA HELPERS
+# MONGODB — Lazy singleton with file fallback
 # ============================================================
-CATALOG_FILE  = os.path.join(BASE_DIR, "catalog.json")
+_mongo_db = None
+
+def get_db():
+    global _mongo_db
+    if _mongo_db is not None:
+        return _mongo_db
+    if not MONGODB_URI:
+        return None
+    try:
+        from pymongo import MongoClient
+        client   = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000, connectTimeoutMS=5000)
+        client.admin.command("ping")
+        _mongo_db = client[MONGO_DB_NAME]
+        # TTL index: sessions auto-expire after 24 h
+        try:
+            _mongo_db.sessions.create_index("updated_at", expireAfterSeconds=86400)
+        except Exception: pass
+        logging.info("✅ [MONGO] Connected to MongoDB Atlas")
+        return _mongo_db
+    except Exception as e:
+        logging.error(f"❌ [MONGO] {e}")
+        return None
+
+# ============================================================
+# PERSISTENCE HELPERS — MongoDB primary, file fallback
+# ============================================================
 SESSIONS_FILE = os.path.join(BASE_DIR, "sessions.json")
-ORDERS_FILE   = os.path.join(BASE_DIR, "orders.json")
 LEADS_FILE    = os.path.join(BASE_DIR, "known_leads.json")
-RESPONSES_FILE = os.path.join(BASE_DIR, "responses.json")
+ORDERS_FILE   = os.path.join(BASE_DIR, "orders.json")
 
-shared_lock = threading.Lock()
-# Use OrderedDict for processed_messages to avoid unbounded growth (LRU cache)
-processed_messages = OrderedDict()
-MAX_PROCESSED_MESSAGES = 1000  # Keep only last 1000 message IDs in memory
-
-# Thread pool for WhatsApp sending (prevents thread explosion)
-whatsapp_executor = ThreadPoolExecutor(max_workers=5)
-
-def load_json(path, default):
-    with shared_lock:
+def _fload(path, default):
+    try:
         if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f: return json.load(f)
-            except: pass
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception: pass
     return default
 
-def save_json(path, data):
-    with shared_lock:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-
-def _touch_session(sess):
-    """Unix timestamp for session TTL cleanup (keep_alive)."""
-    sess["timestamp"] = time.time()
-
-# ============================================================
-# 💬  RESPONSES ENGINE (no AI — 100% stable)
-# ============================================================
-_RESPONSES_CACHE = None
-def get_responses():
-    global _RESPONSES_CACHE
-    if _RESPONSES_CACHE is None:
-        _RESPONSES_CACHE = load_json(RESPONSES_FILE, {})
-    return _RESPONSES_CACHE
-
-def pick_response(intent, **kwargs):
-    """Pick a random response for the given intent and fill in placeholders."""
-    responses = get_responses()
-    templates = responses.get(intent, responses.get("unknown", ["مرحبا! صيفط *أرقامكم* 👑"]))
-    if isinstance(templates, str):
-        templates = [templates]
-    kwargs.setdefault("catalog_url", CATALOG_URL)
-    text = random.choice(templates)
+def _fsave(path, data):
     try:
-        text = text.format(**kwargs)
-    except KeyError:
-        pass
-    return text
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logging.error(f"[FILE SAVE] {path}: {e}")
+
+def load_session(sender):
+    db = get_db()
+    if db:
+        try:
+            doc = db.sessions.find_one({"sender": sender})
+            if doc:
+                doc.pop("_id", None)
+                return doc
+            return {}
+        except Exception as e:
+            logging.warning(f"[SESSION LOAD] Mongo fail: {e}")
+    return _fload(SESSIONS_FILE, {}).get(sender, {})
+
+def save_session(sender, data):
+    db = get_db()
+    if db:
+        try:
+            db.sessions.update_one(
+                {"sender": sender},
+                {"$set": {**data, "sender": sender, "updated_at": datetime.utcnow()}},
+                upsert=True
+            )
+            return
+        except Exception as e:
+            logging.warning(f"[SESSION SAVE] Mongo fail: {e}")
+    sessions = _fload(SESSIONS_FILE, {})
+    sessions[sender] = data
+    _fsave(SESSIONS_FILE, sessions)
+
+def delete_session(sender):
+    db = get_db()
+    if db:
+        try:
+            db.sessions.delete_one({"sender": sender})
+            return
+        except Exception: pass
+    sessions = _fload(SESSIONS_FILE, {})
+    sessions.pop(sender, None)
+    _fsave(SESSIONS_FILE, sessions)
+
+def is_known_lead(sender):
+    db = get_db()
+    if db:
+        try:
+            return db.leads.find_one({"sender": sender}) is not None
+        except Exception: pass
+    return sender in set(_fload(LEADS_FILE, []))
+
+def save_lead(sender, first_msg=""):
+    db = get_db()
+    if db:
+        try:
+            db.leads.update_one(
+                {"sender": sender},
+                {"$setOnInsert": {"sender": sender, "first_msg": first_msg, "first_seen": datetime.utcnow()}},
+                upsert=True
+            )
+            return
+        except Exception: pass
+    leads = set(_fload(LEADS_FILE, []))
+    leads.add(sender)
+    _fsave(LEADS_FILE, list(leads))
+
+def save_order(order):
+    db = get_db()
+    if db:
+        try:
+            db.orders.insert_one(order)
+            return
+        except Exception: pass
+    orders = _fload(ORDERS_FILE, [])
+    orders.append(order)
+    _fsave(ORDERS_FILE, orders)
+
+def get_stats():
+    db = get_db()
+    if db:
+        try:
+            return {
+                "leads":    db.leads.count_documents({}),
+                "sessions": db.sessions.count_documents({}),
+                "orders":   db.orders.count_documents({})
+            }
+        except Exception: pass
+    return {
+        "leads":    len(_fload(LEADS_FILE, [])),
+        "sessions": len(_fload(SESSIONS_FILE, {})),
+        "orders":   len(_fload(ORDERS_FILE, []))
+    }
 
 # ============================================================
-# 📦  CATALOG HELPERS
+# CATALOG HELPERS
 # ============================================================
+CATALOG_FILE = os.path.join(BASE_DIR, "catalog.json")
+
+def load_catalog():
+    return _fload(CATALOG_FILE, {})
+
+def save_catalog(c):
+    _fsave(CATALOG_FILE, c)
+
 def get_all_numbers():
-    catalog = load_json(CATALOG_FILE, {})
+    catalog = load_catalog()
     nums = []
     for tier, items in catalog.items():
         for item in items:
-            item["tier"] = tier
-            nums.append(item)
+            nums.append({**item, "tier": tier})
     return nums
 
-# Regex to extract Moroccan phone numbers from messy user input
-_MOROCCAN_PHONE_RE = re.compile(
-    r'(?:\b(?:num(?:ero)?|nimiro|nemiro|nomero|numero|número)\b[\s:,-]*)?'  # optional local keyword
-    r'(?:(?:\+?212|00212)[\s./-]?)?'   # optional country code: +212, 212, 00212
-    r'(?:0?)([5-7])[\s./-]?(\d{1,2})[\s./-]?(\d{1,2})[\s./-]?(\d{1,2})[\s./-]?(\d{1,2})'
+_PHONE_RE = re.compile(
+    r'(?:\+?212|00212|0)[\s./-]?([5-7][\s./-]?\d[\s./-]?\d[\s./-]?\d[\s./-]?\d[\s./-]?\d[\s./-]?\d[\s./-]?\d[\s./-]?\d)'
 )
 
-def _extract_moroccan_numbers(text):
-    """Extract all plausible Moroccan mobile numbers from text, return as 10-digit strings."""
-    candidates = []
-    for m in _MOROCCAN_PHONE_RE.finditer(text):
-        raw = ''.join(m.groups())
-        digits = ''.join(filter(str.isdigit, raw))
-        if len(digits) == 9:
-            digits = "0" + digits
-        if len(digits) == 10 and digits[0] == '0':
-            candidates.append(digits)
-    # Fallback: brute-force strip all digits if regex found nothing
-    if not candidates:
-        all_digits = ''.join(filter(str.isdigit, text))
-        # Strip leading 212 or 00212
-        for prefix in ('00212', '212'):
-            if all_digits.startswith(prefix):
-                all_digits = '0' + all_digits[len(prefix):]
-                break
-        if len(all_digits) >= 10 and all_digits[0] == '0':
-            candidates.append(all_digits[:10])
-    return candidates
+def find_vip_number(text):
+    """Extract phone number from text and find it in catalog. Returns (item, tier) or (None, None)."""
+    m = _PHONE_RE.search(text)
+    if not m: return None, None
+    raw    = m.group(0)
+    digits = "".join(filter(str.isdigit, raw))
+    if digits.startswith("212"): digits = "0" + digits[3:]
+    if len(digits) != 10: return None, None
 
-def find_number_in_catalog(text):
-    """
-    Find a VIP number from user text. Bypasses strict catalog validation.
-    Returns: (item, tier) or (None, None)
-    """
-    catalog = load_json(CATALOG_FILE, {})
-    candidates = _extract_moroccan_numbers(text)
-    if not candidates:
-        return None, None
-    
-    candidate = candidates[0]
-    
-    # Try to find in catalog for actual price/tier
+    catalog = load_catalog()
     for tier, items in catalog.items():
         for item in items:
-            item_digits = "".join(filter(str.isdigit, item["number"]))
-            # Match: full 10-digit, or last 9 digits
-            if candidate == item_digits or candidate[1:] == item_digits[1:]:
-                return item, tier
-                
-    # If not in catalog, accept it anyway (TASK 3)
-    formatted = f"{candidate[:2]} {candidate[2:4]} {candidate[4:6]} {candidate[6:8]} {candidate[8:]}"
-    return {"number": formatted, "price": "غير محدد", "status": "available", "tier": "Custom"}, "Custom"
+            item_d = "".join(filter(str.isdigit, item["number"]))
+            if digits == item_d or digits[1:] == item_d[1:]:
+                return {**item, "tier": tier}, tier
 
-def is_direct_number_query(text):
-    """
-    Detect if user is directly asking about or mentioning a specific number.
-    Returns True if text contains Arabic/French/English number query keywords.
-    """
-    t = text.lower()
-    # Keywords indicating direct number inquiry: "رقم", "عندك", "كاين", "donne", "envoie", "nomero"
-    direct_keywords = [
-        "رقم", "عندك", "كاين", "ديالكم", "ديالنا",
-        "donne", "envoie", "nomero", "numero", "give", "send", "have",
-        "num", "nimiro", "nemiro", "nmira"
-    ]
-    return any(kw in t for kw in direct_keywords)
+    # Valid but not in catalog
+    fmt = f"{digits[:2]} {digits[2:4]} {digits[4:6]} {digits[6:8]} {digits[8:]}"
+    return {"number": fmt, "price": "غير محدد", "status": "available", "tier": "Custom"}, "Custom"
 
-def format_catalog_message():
-    catalog = load_json(CATALOG_FILE, {})
-    
-    # إذا كان الكتالوج فارغ — رد تنبيه
+def format_catalog_text():
+    catalog = load_catalog()
     if not catalog:
-        return "⚠️ الكتالوج فارغ دابا — أضف نوامر دابا باش تشوفهم هنا! 📋"
-    
-    lines = ["🌟 *أرقام VIP المتوفرة حالياً:* \n"]
-    has_available = False
-    
+        return "⚠️ الكتالوج فارغ حالياً."
+    ICONS  = {"Diamond": "💎", "Gold": "⭐", "Silver": "✨"}
+    LABELS = {"Diamond": "SUPER VIP — 150 DH", "Gold": "VIP — 135 DH", "Silver": "VIP — 100 DH"}
+    lines  = ["🌟 *أرقام VIP المتوفرة:*\n"]
     for tier, items in catalog.items():
-        available = [i for i in items if i.get("status", "available") == "available"]
-        if not available: continue
-        has_available = True
-        lines.append(f"🔹 *{tier.upper()}:*")
-        for item in available:
-            lines.append(f"  📱 {item['number']} — *{item.get('price', 'N/A')}*")
+        avail = [i for i in items if i.get("status", "available") == "available"]
+        if not avail: continue
+        icon  = ICONS.get(tier, "🔹")
+        label = LABELS.get(tier, tier)
+        lines.append(f"{icon} *{label}:*")
+        for item in avail[:10]:
+            lines.append(f"  📱 `{item['number']}`")
         lines.append("")
-    
-    # إذا ما كاينش نوامر متوفرين
-    if not has_available:
-        return "😕 ما كاينش نوامر متوفرين دابا — خاصك تتصل بينا مباشرة! 📞"
-    
-    lines.append(f"🌐 شوف الكتالوج كامل هنا: {CATALOG_URL}")
-    lines.append("\nصيفط ليا الرقم اللي عجبك باش نكملو! 🚀")
+    lines.append("الدفع عند الاستلام ✅ | التوصيل لجميع مدن المغرب 🇲🇦")
     return "\n".join(lines)
 
-def mark_number_sold(number_str):
-    catalog = load_json(CATALOG_FILE, {})
-    clean_target = "".join(filter(str.isdigit, str(number_str)))
-    if len(clean_target) < 9: return False
-    found = False
+def mark_sold(number_str):
+    catalog  = load_catalog()
+    digits   = "".join(filter(str.isdigit, str(number_str)))
+    found    = False
     for tier, items in catalog.items():
         for item in items:
-            clean_item = "".join(filter(str.isdigit, item["number"]))
-            if clean_item == clean_target or clean_item.endswith(clean_target[-9:]):
+            item_d = "".join(filter(str.isdigit, item["number"]))
+            if item_d == digits or item_d[1:] == digits[1:]:
                 item["status"] = "sold"
                 found = True
-    if found: save_json(CATALOG_FILE, catalog)
+    if found: save_catalog(catalog)
     return found
 
-def _is_allowed_price(price_text):
-    digits = "".join(filter(str.isdigit, str(price_text)))
-    if not digits:
-        return False
-    value = int(digits)
-    return 100 <= value <= 200
+# Catalog image URLs (served from Flask /static/)
+CATALOG_IMAGES = {
+    "Diamond": f"{SERVICE_URL}/static/vip_150dh.jpg",
+    "Gold":    f"{SERVICE_URL}/static/vip_135dh.jpg",
+    "Silver":  f"{SERVICE_URL}/static/vip_100dh.jpg",
+}
 
 # ============================================================
-# 🧠  INTENT DETECTION
+# WHATSAPP SEND
 # ============================================================
-GREETING_KW = ["سلام","السلام","مرحبا","أهلا","hi","hello","bonjour","سلا","اهلا","ahlan","mrhba","hola","salam","slm","cv","labas","bsh","yo","salut","hey"]
-CATALOG_KW  = ["الكتالوج","أرقام","ارقام","كتالوج","liste","ليستة","عرض","نوامر","nwamer","catalog","كلهم","catalogue","ارقامكم","arqam","bghit nwamer","warini", "les numéros", "les numeros", "numbers", "numéro", "numero", "نماري", "نمرة", "النوامر", "بغينا النوامر", "ورينا النوامر", "أريد أرقام", "nmari", "nwamar", "واش كاين", "الجديد", "inwi", "orange", "iam"]
-PRICE_KW    = ["الثمن","ثمن","بشحال","بشحال هادي","prix","price","كم","غالي","رخيص","سعر","combien","bch7al","thaman","ch7al","شحال","عرض","inwi","orange","iam"]
-HELP_KW     = ["مساعدة","help","aide","كيفاش","comment","شنو","wayfash","كيف","chno","wach","how"]
-CANCEL_KW   = ["لا","cancel","إلغاء","!reset","/reset","stop","خلاص","مابغيتش","annuler"]
-THANKS_KW   = ["شكرا","merci","thanks","thank","بارك","choukran","mrc","jazak"]
-NEGOT_KW    = ["غالي","رخص","naqes","discount","تخفيض","بزاف","cher","expensive","rkhis"]
-DELIVERY_KW = ["توصيل","livraison","delivery","كيوصل","فين يوصل","kifach","tawsil"]
-TRUST_KW    = ["ثقة","واش حقيقي","serious","arnaque","مضمون","sérieux","legit","wa9i3i","bsa7"]
-
-# ============================================================
-# 🎯  CONTACT REQUEST KEYWORDS (Historical Keywords)
-# ============================================================
-# الأفعال والجذور المتعلقة بطلب المعلومات
-CONTACT_VERBS = [
-    "3tini", "3etini", "sift", "sayft", "bghit", "brit", "momkin", "passi", "donne", "khasni", "khassni",
-    "ارسل", "أعطني", "اعطني", "عطيني", "اعطيني", "صيفط", "سيفط", "بغيت", "ممكن", "خاصني", "خصني", "دابا"
-]
-
-# الأسماء والكلمات المتعلقة برقم والتواصل
-CONTACT_NOUNS = [
-    "nmra", "nemra", "nmera", "namra", "num", "numero", "ra9m", "r9m", "tel", "tilifon", "telfon", "wtsp", "whatsapp", "watsap",
-    "نمرة", "النمرة", "نميرة", "رقم", "الرقم", "تيليفون", "تليفون", "هاتف", "واتساب", "وتساب", "التواصل", "الاتصال"
-]
-
-def detect_intent(text):
-    t = text.lower().strip()
-    words = set(re.split(r'\s+', t))
-    
-    # --- PRIORITY 1: CATALOG (most important — prevents greeting override) ---
-    for kw in CATALOG_KW:
-        if kw in t: return "show_catalog"
-    
-    # --- PRIORITY 2: DIRECT NUMBER QUERY ---
-    digits = "".join(filter(str.isdigit, t))
-    if len(digits) >= 9 and is_direct_number_query(t):
-        return "number_inquiry"
-    
-    # --- PRIORITY 3: CHECK FOR CONTACT REQUEST ---
-    has_verb = any(v in t for v in CONTACT_VERBS)
-    has_noun = any(n in t for n in CONTACT_NOUNS)
-    is_short_msg = len(t.split()) <= 3 and has_noun
-    
-    if (has_verb and has_noun) or is_short_msg:
-        return "contact_request"
-    
-    # --- PRIORITY 4: GREETING (after catalog) ---
-    for kw in GREETING_KW:
-        if kw in t: return "greeting"
-    
-    # --- PRIORITY 5: CANCEL: exact-word match for short words like "لا" ---
-    for kw in CANCEL_KW:
-        if len(kw) <= 2:
-            if kw in words: return "cancel"
-        else:
-            if kw in t: return "cancel"
-    
-    # --- PRIORITY 6: OTHER INTENTS ---
-    for kw in THANKS_KW:
-        if kw in t: return "thanks"
-    for kw in PRICE_KW:
-        if kw in t: return "price_inquiry"
-    for kw in NEGOT_KW:
-        if kw in t: return "negotiation"
-    for kw in DELIVERY_KW:
-        if kw in t: return "delivery_question"
-    for kw in TRUST_KW:
-        if kw in t: return "trust_question"
-    for kw in HELP_KW:
-        if kw in t: return "help"
-
-# ============================================================
-def send_whatsapp(to, text):
-    """Send WhatsApp message with timeout and error handling"""
+def _send_wa(to, payload):
     if not ACCESS_TOKEN or not PHONE_NUMBER_ID:
-        logging.error(f"❌ [SEND BLOCKED] Missing ACCESS_TOKEN or PHONE_NUMBER_ID")
+        logging.error("[SEND] Missing ACCESS_TOKEN or PHONE_NUMBER_ID")
         return False
-    
-    headers = {"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"}
-    payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text[:4096]}}  # WhatsApp max 4096 chars
     try:
-        r = requests.post(API_URL, headers=headers, json=payload, timeout=15)
-        logging.info(f"📲 [SEND] To: {to} | Status: {r.status_code}")
-        if r.status_code not in (200, 201):
-            logging.error(f"❌ [SEND FAIL] Status: {r.status_code} | {r.text[:500]}")
-        return r.status_code in (200, 201)
-    except requests.Timeout:
-        logging.error(f"⏱️ [SEND TIMEOUT] To: {to}")
-        return False
+        r = requests.post(
+            META_API_URL,
+            headers={"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"},
+            json={**payload, "messaging_product": "whatsapp", "to": to},
+            timeout=15
+        )
+        ok = r.status_code in (200, 201)
+        if not ok:
+            logging.error(f"[SEND FAIL] {r.status_code} → {r.text[:300]}")
+        return ok
     except Exception as e:
-        logging.error(f"❌ [SEND ERROR] To: {to} | Error: {e}")
+        logging.error(f"[SEND ERROR] {e}")
         return False
 
-def send_whatsapp_async(to, text):
-    """Send WhatsApp message asynchronously using thread pool"""
-    return whatsapp_executor.submit(send_whatsapp, to, text)
+def send_text(to, text):
+    return _send_wa(to, {"type": "text", "text": {"body": text[:4096]}})
 
-def send_admin_notification(phone, msg):
-    """Send an urgent admin notification safely."""
-    return send_whatsapp(phone, msg)
+def send_image(to, url, caption=""):
+    return _send_wa(to, {"type": "image", "image": {"link": url, "caption": caption[:1024]}})
+
+def send_text_async(to, text):   executor.submit(send_text,  to, text)
+def send_image_async(to, url, caption=""): executor.submit(send_image, to, url, caption)
+
+# ============================================================
+# AI ENGINE — Nessrine (NVIDIA NIM → Groq → static fallback)
+# ============================================================
+NESSRINE_SYSTEM = """أنتِ نسرين، خبيرة مبيعات محترفة في "VIP Numbers Morocco" بخبرة 40 سنة.
+تتحدثين بثلاث لغات بطلاقة تامة: الدارجة المغربية 🇲🇦 | الفرنسية 🇫🇷 | الإنجليزية 🇬🇧
+(تكيفي لغتكِ تلقائياً مع لغة العميل)
+
+🎯 مهمتكِ الوحيدة: إقناع العميل وإتمام البيع باحترافية ودفء حقيقي.
+✨ أسلوبكِ: طبيعي، حار، مقنع — مثل محادثة WhatsApp بين أشخاص يثقون ببعضهم.
+🚫 ممنوع تماماً: الأسلوب الآلي أو الردود العامة أو الجمل الطويلة الفارغة.
+
+💰 الأسعار النهائية (لا خصومات):
+• 💎 150 درهم — أرقام SUPER VIP (أرقام مكررة رباعية كـ 2222 أو 8888)
+• ⭐ 135 درهم — أرقام VIP مميزة (أرقام مكررة ثلاثية كـ 777 أو 888)
+• ✨ 100 درهم — أرقام VIP جميلة
+
+✅ الدفع عند الاستلام دائماً — التوصيل لجميع مدن المغرب 🇲🇦
+🚫 لا تختلقي أرقاماً. تحدثي فقط عن أرقام الكتالوج.
+📦 عند طلب الشراء: اجمعي الاسم + المدينة + رقم التواصل لتأكيد الطلب.
+⚡ ردودكِ: قصيرة (1-3 جمل). مؤثرة. إيموجي طبيعية. لا حشو."""
 
 
-def notify_admin_media(sender, media_type):
-    if sender == ADMIN_PHONE:
-        return
-    media_label = "صورة/ملف" if media_type in ("image", "document", "audio", "video", "sticker") else "ميديا"
-    alert = (
-        "⚠️ الكليان صيفط صورة/ملف! شوفها فـ Meta Dashboard.\n"
-        f"📞 من: {sender}\n"
-        f"📎 النوع: {media_type} ({media_label})\n"
-        f"🔗 https://wa.me/{sender}"
+def _build_messages(sender, user_msg, session):
+    catalog = load_catalog()
+    tier_summary = " | ".join(
+        f"{tier}({len([i for i in items if i.get('status','available')=='available'])} متوفر بـ"
+        f"{'150' if tier=='Diamond' else '135' if tier=='Gold' else '100'}دh)"
+        for tier, items in catalog.items()
     )
-    send_whatsapp_async(ADMIN_PHONE, alert)
+    system = NESSRINE_SYSTEM + f"\n\n📦 الكتالوج الحالي: {tier_summary}"
+
+    messages = [{"role": "system", "content": system}]
+
+    # Last 5 exchanges from history
+    for h in session.get("history", [])[-5:]:
+        if h.get("user"): messages.append({"role": "user",      "content": h["user"]})
+        if h.get("bot"):  messages.append({"role": "assistant", "content": h["bot"]})
+
+    messages.append({"role": "user", "content": user_msg})
+    return messages
+
+
+def ask_nvidia(messages):
+    if not NVIDIA_API_KEY: return None
+    try:
+        r = requests.post(
+            "https://integrate.api.nvidia.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {NVIDIA_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "model": "meta/llama-3.3-70b-instruct",
+                "messages": messages,
+                "temperature": 0.75,
+                "max_tokens": 2000,
+                "top_p": 0.9
+            },
+            timeout=25
+        )
+        if r.status_code == 200:
+            return r.json()["choices"][0]["message"]["content"].strip()
+        logging.warning(f"[NVIDIA] {r.status_code}: {r.text[:200]}")
+    except Exception as e:
+        logging.error(f"[NVIDIA ERROR] {e}")
+    return None
+
+
+def ask_groq(messages):
+    if not GROQ_API_KEY: return None
+    try:
+        r = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": messages,
+                "temperature": 0.7,
+                "max_tokens": 1024
+            },
+            timeout=15
+        )
+        if r.status_code == 200:
+            return r.json()["choices"][0]["message"]["content"].strip()
+        logging.warning(f"[GROQ] {r.status_code}: {r.text[:200]}")
+    except Exception as e:
+        logging.error(f"[GROQ ERROR] {e}")
+    return None
+
+
+def nessrine_reply(sender, user_msg, session):
+    """Primary: NVIDIA NIM (2000 tokens) → Fallback: Groq → None"""
+    msgs = _build_messages(sender, user_msg, session)
+    reply = ask_nvidia(msgs)
+    if reply:
+        logging.info(f"[AI:NVIDIA] ✅ replied for {sender}")
+        return reply
+    reply = ask_groq(msgs)
+    if reply:
+        logging.info(f"[AI:GROQ] ✅ fallback for {sender}")
+        return reply
+    logging.warning(f"[AI] All engines failed for {sender}")
+    return None
+
+
+def update_history(session, user_msg, bot_reply):
+    history = session.get("history", [])
+    history.append({"user": user_msg, "bot": bot_reply})
+    if len(history) > 10:
+        history = history[-10:]
+    session["history"] = history
+    return session
 
 # ============================================================
-# 🛠️  ADMIN COMMANDS
+# ORDER FLOW STATE MACHINE
 # ============================================================
-def handle_admin_command(sender, text):
+_CANCEL_W = {"لا", "non", "no", "cancel", "stop", "إلغاء", "annuler", "مابغيتش", "خلاص", "bghit_annuler"}
+
+
+def run_order_flow(sender, text, session):
+    step = session.get("step")
+    data = session.get("data", {})
+    t    = text.strip()
+    tl   = t.lower()
+
+    # Cancel allowed on any step except ask_phone (where "لا" = no contact number)
+    if step != "ask_phone" and any(w in tl.split() for w in _CANCEL_W):
+        delete_session(sender)
+        return "واخا خويا 😊 الطلب ألغينا. إلا بغيتي شي حاجة أخرى، أنا هنا دايماً! 🌟"
+
+    if step == "ask_name":
+        data["name"] = t
+        session["data"] = data
+        session["step"] = "ask_city"
+        save_session(sender, session)
+        return f"أهلاً {t}! 🌟\nفي أي مدينة تسكن؟ 📍"
+
+    if step == "ask_city":
+        data["city"] = t
+        session["data"] = data
+        session["step"] = "ask_phone"
+        save_session(sender, session)
+        return "آخر خطوة — رقم هاتفك للتواصل 📞\n(صيفط *لا* إلا كانك ما بغيتيش)"
+
+    if step == "ask_phone":
+        data["contact_phone"] = "واتساب" if tl in {"لا", "no", "non", "la"} else t
+
+        order_id = f"VIP-{datetime.now().strftime('%d%m%Y-%H%M%S')}-{random.randint(100, 999)}"
+        vip      = session.get("vip_item", {})
+        order    = {
+            "id":         order_id,
+            "sender":     sender,
+            "vip_number": vip.get("number", ""),
+            "price":      vip.get("price", ""),
+            "tier":       vip.get("tier", ""),
+            "customer":   {
+                "name":  data.get("name", ""),
+                "city":  data.get("city", ""),
+                "phone": data.get("contact_phone", "")
+            },
+            "time":   datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "status": "pending"
+        }
+        save_order(order)
+        mark_sold(vip.get("number", ""))
+
+        # Immediate admin alert
+        alert = (
+            f"🎉 *طلب جديد — VIP Numbers!*\n"
+            f"📱 الرقم: *{vip.get('number', '')}* — {vip.get('price', '')}\n"
+            f"👤 الاسم: {data.get('name', '')}\n"
+            f"📍 المدينة: {data.get('city', '')}\n"
+            f"📞 تواصل: {data.get('contact_phone', '')}\n"
+            f"🆔 الطلب: {order_id}\n"
+            f"🔗 https://wa.me/{sender}"
+        )
+        executor.submit(send_text, ADMIN_PHONE, alert)
+        delete_session(sender)
+
+        return (
+            f"✅ *تم تأكيد طلبك!* 🎉\n\n"
+            f"📱 الرقم: *{vip.get('number', '')}*\n"
+            f"👤 الاسم: {data.get('name', '')}\n"
+            f"📍 المدينة: {data.get('city', '')}\n"
+            f"💰 الثمن: {vip.get('price', '')}\n\n"
+            f"🚚 سنتصل بك قريباً لتأكيد التوصيل!\n"
+            f"شكراً على ثقتك خويا 💛"
+        )
+    return None
+
+# ============================================================
+# CATALOG IMAGE SENDING
+# ============================================================
+TIER_CONFIG = [
+    ("Diamond", "💎 *أرقام SUPER VIP — 150 درهم*\nأرقام متكررة رباعية ونادرة ⭐"),
+    ("Gold",    "⭐ *أرقام VIP مميزة — 135 درهم*\nأرقام ثلاثية التكرار ومطلوبة 🔥"),
+    ("Silver",  "✨ *أرقام VIP — 100 درهم*\nأرقام جميلة بثمن مناسب 💫"),
+]
+
+
+def send_catalog_images(sender):
+    """Send catalog images (one per tier) with number lists in caption"""
+    catalog   = load_catalog()
+    sent_any  = False
+
+    for tier, caption_header in TIER_CONFIG:
+        items   = catalog.get(tier, [])
+        avail   = [i for i in items if i.get("status", "available") == "available"]
+        if not avail: continue
+
+        nums_txt = "\n".join(f"  📱 {i['number']}" for i in avail[:10])
+        full_cap = f"{caption_header}\n\n{nums_txt}\n\n✅ الدفع عند الاستلام | 🇲🇦 التوصيل لجميع المدن"
+        img_url  = CATALOG_IMAGES.get(tier)
+
+        if img_url:
+            ok = send_image(sender, img_url, full_cap)
+            if not ok:
+                send_text(sender, full_cap)
+        else:
+            send_text(sender, full_cap)
+
+        sent_any = True
+        time.sleep(0.8)
+
+    if sent_any:
+        time.sleep(0.5)
+        send_text(sender,
+            "📌 صيفط ليا الرقم اللي عجبك وغنكمل معك الطلب في ثوانٍ! 🚀\n"
+            "الدفع عند الاستلام ✅ — ما كتخلص حتى تشد الرقم فيدك 🤝"
+        )
+    else:
+        send_text(sender, "⚠️ الكتالوج فارغ حالياً. تواصل معنا مباشرة على 07 78 37 50 26 📞")
+
+# ============================================================
+# FAST INTENT (no AI, instant routing)
+# ============================================================
+_RE_CATALOG  = re.compile(r'\b(نوامر|أرقام|ارقام|كتالوج|catalog|catalogue|nwamer|nwamar|nmari|'
+                           r'liste|warini|عرض|ورينا|واش\s*كاين|الجديد|les\s*num|show\s*me)\b', re.I)
+_RE_GREETING = re.compile(r'\b(سلام|السلام|مرحبا|أهلا|اهلا|hi|hello|bonjour|salut|salam|slm|hey|cv|labas)\b', re.I)
+_RE_PRICE    = re.compile(r'\b(ثمن|بشحال|prix|price|combien|شحال|thaman|bch7al)\b', re.I)
+_RE_TRUST    = re.compile(r'\b(مضمون|serious|sérieux|arnaque|ثقة|واش\s*حقيقي|legit|bsa7)\b', re.I)
+_RE_DELIVERY = re.compile(r'\b(توصيل|livraison|delivery|tawsil|kifach\s*tawsil)\b', re.I)
+_RE_THANKS   = re.compile(r'\b(شكرا|شكراً|merci|thanks|choukran|mrc)\b', re.I)
+
+
+def quick_intent(text):
+    t = text.strip()
+    if _RE_CATALOG.search(t):  return "catalog"
+    if _RE_PRICE.search(t):    return "price"
+    if _RE_TRUST.search(t):    return "trust"
+    if _RE_DELIVERY.search(t): return "delivery"
+    if _RE_THANKS.search(t):   return "thanks"
+    if _RE_GREETING.search(t): return "greeting"
+    return None
+
+# ============================================================
+# ADMIN COMMANDS
+# ============================================================
+def handle_admin(sender, text):
     parts = text.strip().lower().split()
-    if not parts: return "Admin mode."
-    base = parts[0]
+    if not parts: return "Admin mode ✅"
+    cmd = parts[0]
 
-    def get_digits(t):
-        return re.findall(r'\d{7,15}', "".join(filter(lambda x: x.isdigit() or x.isspace(), t)))
+    if cmd == "!help":
+        return (
+            "🛠️ *Commandes Admin Nessrine v8:*\n"
+            "• `!stats` — Statistiques complètes\n"
+            "• `!sold [num]` — Marquer vendu\n"
+            "• `!add [num] [tier] [prix]` — Ajouter numéro\n"
+            "• `!del [num]` — Supprimer numéro\n"
+            "• `!reset` — Reset sessions\n"
+            "• `!test` — Test notification admin\n"
+            "• `!catalog` — Voir catalogue texte\n"
+            "• `!img [num_wa]` — Envoyer images catalog\n"
+        )
 
-    if base == "!help":
-        return ("🛠️ *أوامر التحكم:*\n\n"
-                "• `!stats` - إحصائيات\n• `!sold [رقم]` - تعليم كمباع\n"
-                "• `!add [رقم] [صنف] [ثمن]` - إضافة\n• `!delete [رقم]` - حذف\n"
-                "• `!reset` - مسح الجلسات\n• `!test` - اختبار الإشعارات")
-    if base == "!stats":
-        nums = get_all_numbers()
-        avail = len([n for n in nums if n.get("status") == "available"])
-        sold = len([n for n in nums if n.get("status") == "sold"])
-        orders = load_json(ORDERS_FILE, [])
-        return f"📊 *إحصائيات:*\n✅ متوفر: {avail}\n❌ مباع: {sold}\n📋 طلبات: {len(orders)}"
-    if base == "!sold":
-        targets = get_digits(text)
-        if not targets: return "❌ صيفط الرقم."
-        c = sum(1 for t in targets if mark_number_sold(t))
-        return f"✅ تم تعليم {c} أرقام كمباعة." if c else "❌ ما لقيناش الرقم."
-    if base in ("!delete", "!del"):
-        targets = get_digits(text)
-        if not targets: return "❌ صيفط الرقم."
-        catalog = load_json(CATALOG_FILE, {})
-        deleted = []
-        for t in targets:
-            for tier in catalog:
-                before = len(catalog[tier])
-                catalog[tier] = [i for i in catalog[tier] if "".join(filter(str.isdigit, i["number"])) != t and not "".join(filter(str.isdigit, i["number"])).endswith(t[-9:])]
-                if len(catalog[tier]) < before: deleted.append(t)
+    if cmd == "!stats":
+        nums  = get_all_numbers()
+        avail = sum(1 for n in nums if n.get("status", "available") == "available")
+        sold  = sum(1 for n in nums if n.get("status") == "sold")
+        s     = get_stats()
+        return (
+            f"📊 *Stats Nessrine v8:*\n"
+            f"✅ Disponibles: {avail}\n"
+            f"❌ Vendus: {sold}\n"
+            f"👥 Leads: {s['leads']}\n"
+            f"📋 Commandes: {s['orders']}\n"
+            f"⏳ Sessions actives: {s['sessions']}\n"
+            f"🤖 NVIDIA: {'✅' if NVIDIA_API_KEY else '❌'}\n"
+            f"🔄 Groq: {'✅' if GROQ_API_KEY else '❌'}\n"
+            f"🍃 MongoDB: {'✅' if get_db() else '📁 file'}"
+        )
+
+    if cmd == "!catalog":
+        return format_catalog_text()
+
+    if cmd == "!img" and len(parts) > 1:
+        target = "".join(filter(str.isdigit, " ".join(parts[1:])))
+        if not target.startswith("212"):
+            target = "212" + target.lstrip("0")
+        executor.submit(send_catalog_images, target)
+        return f"📸 Images envoyées à {target}"
+
+    if cmd == "!sold" and len(parts) > 1:
+        target = "".join(filter(str.isdigit, " ".join(parts[1:])))
+        ok = mark_sold(target)
+        return f"✅ Marqué vendu: {target}" if ok else f"❌ Introuvable: {target}"
+
+    if cmd in ("!del", "!delete") and len(parts) > 1:
+        target  = "".join(filter(str.isdigit, " ".join(parts[1:])))
+        catalog = load_catalog()
+        deleted = False
+        for tier in catalog:
+            before = len(catalog[tier])
+            catalog[tier] = [i for i in catalog[tier]
+                             if "".join(filter(str.isdigit, i["number"])) != target]
+            if len(catalog[tier]) < before: deleted = True
         if deleted:
-            save_json(CATALOG_FILE, catalog)
-            return "🗑️ تم الحذف:\n" + "\n".join(f"• {n}" for n in set(deleted))
-        return "❌ ما لقيناش."
-    if base == "!add" and len(parts) > 3:
-        num, tier, price = parts[1], parts[2], " ".join(parts[3:])
-        if not _is_allowed_price(price):
-            return "❌ الثمن المسموح فقط بين 100 و 200 DH."
-        catalog = load_json(CATALOG_FILE, {})
+            save_catalog(catalog)
+            return f"🗑️ Supprimé: {target}"
+        return f"❌ Introuvable: {target}"
+
+    if cmd == "!add" and len(parts) >= 4:
+        num, tier, price = parts[1], parts[2].capitalize(), " ".join(parts[3:])
+        catalog = load_catalog()
         if tier not in catalog: catalog[tier] = []
-        catalog[tier].append({"number": num, "price": price, "status": "available", "tier": tier})
-        save_json(CATALOG_FILE, catalog)
-        return f"✅ تم إضافة {num} إلى {tier}."
-    if base == "!reset":
-        save_json(SESSIONS_FILE, {})
-        return "♻️ تم تصفير الجلسات."
-    if base == "!test":
-        threading.Thread(target=send_whatsapp, args=(ADMIN_PHONE, "🔔 اختبار — الإشعارات خدامة! ✅")).start()
-        return "✅ تم إرسال اختبار."
-    return "🛠️ أمر غير معروف. صيفط `!help`"
+        d = "".join(filter(str.isdigit, num))
+        fmt = f"{d[:2]} {d[2:4]} {d[4:6]} {d[6:8]} {d[8:]}" if len(d) == 10 else num
+        catalog[tier].append({"number": fmt, "price": price, "status": "available"})
+        save_catalog(catalog)
+        return f"✅ Ajouté: {fmt} → {tier} ({price})"
+
+    if cmd == "!reset":
+        db = get_db()
+        if db:
+            try: db.sessions.delete_many({})
+            except Exception: pass
+        _fsave(SESSIONS_FILE, {})
+        return "♻️ Sessions réinitialisées."
+
+    if cmd == "!test":
+        executor.submit(send_text, ADMIN_PHONE,
+            "🔔 *Test Nessrine v8* — Bot actif ✅\nNVIDIA NIM + MongoDB + Keep-Alive")
+        return "✅ Notification test envoyée."
+
+    return f"❓ Commande inconnue: `{cmd}` — tape `!help`"
 
 # ============================================================
-# 🧠  MAIN LOGIC — 100% responses.json, ZERO AI
+# STATIC FALLBACK REPLIES
 # ============================================================
-def _get_known_leads():
-    return set(load_json(LEADS_FILE, []))
+STATIC = {
+    "greeting": [
+        "أهلاً وسهلاً! 🌟 أنا نسرين من *VIP Numbers Morocco* 👑\nصيفط *نوامر* باش تشوف الأرقام المتوفرة! 📱",
+        "مرحبا بيك خويا! 😊 أنا نسرين، هنا لمساعدتك تلقى رقمك المثالي 💎\nشوف الكتالوج بـ *نوامر*! 🚀",
+        "Bonjour! 👋 Je suis Nessrine de VIP Numbers Morocco 🇲🇦\nTapez *numéros* pour voir notre catalogue! 📋"
+    ],
+    "price": [
+        "💰 أسعارنا:\n• 💎 *150 DH* — أرقام SUPER VIP (رباعية التكرار)\n• ⭐ *135 DH* — أرقام VIP مميزة\n• ✨ *100 DH* — أرقام VIP جميلة\n\nالدفع عند الاستلام ✅",
+    ],
+    "trust": [
+        "✅ نخدمو منذ سنوات والحمدلله! الدفع عند الاستلام — ما كتخلص حتى تشد الرقم فيدك 🤝\nكلينا راضيين والحمدلله! 💛",
+    ],
+    "delivery": [
+        "🚚 كنوصلو لجميع مدن المغرب! الدفع عند الاستلام ✅\nفين تسكن؟ نقدرو نشوف ليك التوصيل 📍",
+    ],
+    "thanks": [
+        "الله يبارك فيك خويا! 😊 ديما في الخدمة 💛",
+        "العفو خويا! 🌟 إلا احتجت شي حاجة أخرى، أنا هنا! 😊",
+    ],
+}
 
-def _save_known_lead(sender):
-    leads = _get_known_leads()
-    leads.add(sender)
-    save_json(LEADS_FILE, list(leads))
 
+def _static(intent):
+    opts = STATIC.get(intent, ["مرحبا! 🌟 صيفط *نوامر* باش تشوف الأرقام المتوفرة! 📱"])
+    return random.choice(opts)
+
+# ============================================================
+# MAIN LOGIC
+# ============================================================
 def handle_logic(sender, text):
-    sessions = load_json(SESSIONS_FILE, {})
-    raw_text = text.strip()
+    try:
+        raw = text.strip()
+        if not raw: return None
 
-    # — NOTIFY ADMIN (Immediate, failure-safe) —
-    if sender != ADMIN_PHONE:
-        logging.info(f"🔔 [NOTIFY ADMIN] New message from {sender}")
-        def _safe_admin_notify(phone, msg):
+        # ── ADMIN ────────────────────────────────────────────
+        if sender == ADMIN_PHONE:
+            return handle_admin(sender, raw) if raw.startswith("!") else None
+
+        # ── ADMIN ALERT — every non-admin message ────────────
+        def _alert():
             try:
-                send_whatsapp(phone, msg)
-            except Exception as e:
-                logging.error(f"❌ [ADMIN NOTIFY FAIL] {e}")
-        threading.Thread(target=_safe_admin_notify, args=(ADMIN_PHONE, f"📩 *ميساج جديد من {sender}:*\n\"{raw_text}\"")).start()
-
-    # — ADMIN: no lead/name flow; commands only (non-commands: clear stale session, no reply) —
-    if sender == ADMIN_PHONE:
-        if raw_text.startswith("!"):
-            return handle_admin_command(sender, raw_text)
-        sessions.pop(sender, None)
-        save_json(SESSIONS_FILE, sessions)
-        return None
-
-    # — NEW LEAD / NAME REQUEST (first contact) —
-    known = _get_known_leads()
-    if sender not in known:
-        _save_known_lead(sender)
-        # TASK 1: Ghost Lead Capture (Immediate Admin Alert)
-        threading.Thread(target=_safe_admin_notify, args=(ADMIN_PHONE, f"🚨 New Lead Clicked: {sender}\nرسالة: {raw_text}")).start()
-        
-        vip_item, tier = find_number_in_catalog(raw_text)
-        
-        if vip_item:
-            sessions[sender] = {"step": "initial_name", "data": {}, "first_msg": raw_text, "vip_item": vip_item}
-            _touch_session(sessions[sender])
-            save_json(SESSIONS_FILE, sessions)
-            return f"مرحبا بيك أخويا/أختي ✨\nسجلنا الرقم ديالك: {vip_item['number']} 🎯\nشنو الإسم الكريم باش نأكدو الطلب؟"
-        else:
-            sessions[sender] = {"step": "initial_name", "data": {}, "first_msg": raw_text}
-            _touch_session(sessions[sender])
-            save_json(SESSIONS_FILE, sessions)
-            return pick_response("ask_name_initial")
-
-    # — IMMEDIATE NUMBER VERIFICATION (before sessions/forms) —
-    # Check if user is asking about a specific number (رقم، عندك، كاين، brit, etc)
-    t_low = raw_text.lower()
-    digits_in_text = "".join(filter(str.isdigit, t_low))
-    if is_direct_number_query(t_low) and len(digits_in_text) >= 9:
-        vip_item, tier = find_number_in_catalog(raw_text)
-        if vip_item:
-            sessions[sender] = {"step": "initial_name", "data": {}, "first_msg": raw_text, "vip_item": vip_item}
-            _touch_session(sessions[sender])
-            save_json(SESSIONS_FILE, sessions)
-            return f"مرحبا بيك أخويا/أختي ✨\nسجلنا الرقم ديالك: {vip_item['number']} 🎯\nشنو الإسم الكريم باش نأكدو الطلب؟"
-        else:
-            return pick_response("number_not_found", catalog_url=CATALOG_URL)
-
-    # — ORDER FORM FLOW —
-    if sender in sessions and "step" in sessions[sender]:
-        session = sessions[sender]
-        step = session["step"]
-
-        if step == "initial_name":
-            name = raw_text
-            session["data"]["name"] = name
-            
-            vip_item = session.get("vip_item")
-            
-            if vip_item:
-                # Finalize order directly (TASK 3)
-                city = "غير محدد"
-                vip_num = vip_item["number"]
-                orders = load_json(ORDERS_FILE, [])
-                order_id = f"ORD-{datetime.now().strftime('%d%m%Y-%H%M%S')}"
-                orders.append({
-                    "id": order_id, "sender": sender, "vip_number": vip_num,
-                    "price": vip_item.get("price", "N/A"),
-                    "tier": vip_item.get("tier", ""),
-                    "customer": {"name": name, "address": city, "phone": "whatsapp"},
-                    "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status": "pending"
-                })
-                save_json(ORDERS_FILE, orders)
-                
-                backup_summary = (
-                    "🗂️ NEW ORDER FINALIZED\n"
-                    f"sender={sender}\n"
-                    f"number={vip_num}\n"
-                    f"name={name}\n"
-                    f"price={vip_item.get('price', 'N/A')}"
+                send_text(ADMIN_PHONE,
+                    f"📩 *رسالة جديدة*\n"
+                    f"📞 {sender}\n"
+                    f"💬 \"{raw[:150]}\"\n"
+                    f"🔗 https://wa.me/{sender}"
                 )
-                threading.Thread(target=_safe_admin_notify, args=(ADMIN_PHONE, backup_summary)).start()
-                mark_number_sold(vip_num)
-                
-                sessions.pop(sender, None)
-                save_json(SESSIONS_FILE, sessions)
-                return pick_response("order_complete", number=vip_num, name=name, city=city)
-            else:
-                # No number picked yet, just welcome
-                sessions.pop(sender, None)
-                save_json(SESSIONS_FILE, sessions)
-                return pick_response("welcome_with_name", name=name)
+            except Exception as e:
+                logging.error(f"[ADMIN ALERT] {e}")
+        executor.submit(_alert)
 
-        if step == "address":
-            city = raw_text
-            vip_item = session.get("vip_item")
-            if not vip_item:
-                sessions.pop(sender, None)
-                save_json(SESSIONS_FILE, sessions)
-                return pick_response("unknown")
-            od = session.get("data", {})
-            name = od.get("name", "")
-            vip_num = vip_item["number"]
-            od["address"] = city
-            orders = load_json(ORDERS_FILE, [])
-            order_id = f"ORD-{datetime.now().strftime('%d%m%Y-%H%M%S')}"
-            orders.append({
-                "id": order_id, "sender": sender, "vip_number": vip_num,
-                "price": vip_item.get("price", "N/A"),
-                "tier": vip_item.get("tier", ""),
-                "customer": {"name": name, "address": city, "phone": "whatsapp"},
-                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status": "pending"
-            })
-            save_json(ORDERS_FILE, orders)
-            backup_summary = (
-                "🗂️ BACKUP ORDER RAW\n"
-                f"id={order_id}\n"
-                f"sender={sender}\n"
-                f"number={vip_num}\n"
-                f"price={vip_item.get('price', 'N/A')}\n"
-                f"tier={vip_item.get('tier', '')}\n"
-                f"name={name}\n"
-                f"city={city}\n"
-                f"time={datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        # ── LOAD SESSION ─────────────────────────────────────
+        session = load_session(sender)
+
+        # ── NEW LEAD ─────────────────────────────────────────
+        is_new = not is_known_lead(sender)
+        if is_new:
+            save_lead(sender, raw)
+            # Check if first message contains a VIP number
+            vip_item, _ = find_vip_number(raw)
+            if vip_item and vip_item.get("status") == "available":
+                session = {"step": "ask_name", "data": {}, "vip_item": vip_item, "history": []}
+                save_session(sender, session)
+                ai_reply = nessrine_reply(
+                    sender,
+                    f"عميل جديد أول رسالة له — يريد الرقم {vip_item['number']} بـ{vip_item['price']}. رحبي به بحرارة وأكدي توفر الرقم ثم اسأليه عن اسمه الكريم.",
+                    session
+                )
+                if not ai_reply:
+                    ai_reply = (
+                        f"أهلاً وسهلاً بيك! 🌟\n"
+                        f"الرقم *{vip_item['number']}* متوفر بـ *{vip_item['price']}* فقط — اختيار رائع! 💎\n"
+                        f"شنو سميتك الكريمة؟ 🖊️"
+                    )
+                update_history(session, raw, ai_reply)
+                save_session(sender, session)
+                return ai_reply
+            else:
+                session = {"history": []}
+                save_session(sender, session)
+                ai_reply = nessrine_reply(sender, raw, session)
+                if not ai_reply:
+                    ai_reply = _static("greeting")
+                update_history(session, raw, ai_reply)
+                save_session(sender, session)
+                return ai_reply
+
+        # ── ACTIVE ORDER FLOW ─────────────────────────────────
+        if session.get("step") in ("ask_name", "ask_city", "ask_phone"):
+            reply = run_order_flow(sender, raw, session)
+            if reply: return reply
+
+        # ── VIP NUMBER DETECTED ───────────────────────────────
+        vip_item, _ = find_vip_number(raw)
+        if vip_item:
+            if vip_item.get("status") == "sold":
+                ai_reply = nessrine_reply(
+                    sender,
+                    f"العميل يسأل عن الرقم {vip_item['number']} لكنه مباع. اعتذري بأسلوب راقٍ واقترحي عليه أرقاماً مشابهة من الكتالوج.",
+                    session
+                )
+                if not ai_reply:
+                    ai_reply = (
+                        f"معذرة خويا 😅 الرقم *{vip_item['number']}* تبيع للتو!\n"
+                        f"عندنا أرقام مميزة أخرى — صيفط *نوامر* باش تشوف الكتالوج 📋"
+                    )
+                update_history(session, raw, ai_reply)
+                save_session(sender, session)
+                return ai_reply
+
+            # Available → start order
+            session["step"]     = "ask_name"
+            session["data"]     = {}
+            session["vip_item"] = vip_item
+            session.setdefault("history", [])
+            save_session(sender, session)
+
+            ai_reply = nessrine_reply(
+                sender,
+                f"العميل يريد الرقم {vip_item['number']} بـ{vip_item['price']}. أكدي توفره بحماس واسأليه عن اسمه.",
+                session
             )
-            send_whatsapp(ADMIN_PHONE, backup_summary)
-            mark_number_sold(vip_num)
-            admin_msg = pick_response("admin_order", number=vip_num, name=name or "?", city=city or "?", phone="واتساب", sender=sender)
-            send_whatsapp(ADMIN_PHONE, admin_msg)
-            sessions.pop(sender, None)
-            save_json(SESSIONS_FILE, sessions)
-            return pick_response("order_complete", number=vip_num, name=name, city=city)
+            if not ai_reply:
+                ai_reply = (
+                    f"ممتاز! 🎯 الرقم *{vip_item['number']}* متوفر بـ *{vip_item['price']}* فقط!\n"
+                    f"الدفع عند الاستلام ✅ — شنو سميتك الكريمة؟ 🖊️"
+                )
+            update_history(session, raw, ai_reply)
+            save_session(sender, session)
+            return ai_reply
 
-        if step == "confirm":
-            t_low = raw_text.lower().strip()
-            yes_w = ["نعم","aywa","oui","yes","واه","اه","ايوا","yep","ok","okay","بغيت","هيا","kayen","iyeh","wah"]
-            no_w = ["لا","non","no","nope","ma bghitch","ما بغيتش","la"]
-            vip = session["vip_item"]
-            if any(w in t_low for w in yes_w):
-                session["step"] = "initial_name"
-                session["data"] = {}
-                session["vip_item"] = vip
-                _touch_session(session)
-                sessions[sender] = session
-                save_json(SESSIONS_FILE, sessions)
-                return pick_response("confirm_yes", number=vip["number"])
-            elif any(w in t_low for w in no_w):
-                sessions.pop(sender, None)
-                save_json(SESSIONS_FILE, sessions)
-                return pick_response("confirm_no")
-            else:
-                return pick_response("confirm_unclear", number=vip["number"], price=vip.get("price", "200 DH"))
+        # ── QUICK INTENT ──────────────────────────────────────
+        intent = quick_intent(raw)
 
-    # — CHECK FOR VIP NUMBER —
-    vip_item, tier = find_number_in_catalog(raw_text)
-    if vip_item:
-        sessions[sender] = {"step": "confirm", "vip_item": vip_item, "data": {}}
-        _touch_session(sessions[sender])
-        save_json(SESSIONS_FILE, sessions)
-        return pick_response("number_available", number=vip_item["number"], price=vip_item.get("price", "N/A"))
+        if intent == "catalog":
+            executor.submit(send_catalog_images, sender)
+            return None  # Images sent by send_catalog_images
 
-    # — INTENT DETECTION —
-    intent = detect_intent(raw_text)
+        # ── NESSRINE AI REPLY ─────────────────────────────────
+        ai_reply = nessrine_reply(sender, raw, session)
+        if ai_reply:
+            update_history(session, raw, ai_reply)
+            save_session(sender, session)
+            return ai_reply
 
-    if intent == "show_catalog":
-        catalog_text = format_catalog_message()
-        return pick_response("show_catalog", catalog=catalog_text)
+        # ── STATIC FALLBACK ───────────────────────────────────
+        reply = _static(intent or "greeting")
+        update_history(session, raw, reply)
+        save_session(sender, session)
+        return reply
 
-    if intent == "number_inquiry":
-        return pick_response("number_not_found")
-
-    if intent == "contact_request":
-        return pick_response("contact_request", catalog_url=CATALOG_URL)
-
-    if intent in ("greeting", "price_inquiry", "help", "cancel", "thanks", "negotiation", "delivery_question", "trust_question", "unknown"):
-        if intent == "cancel" and sender in sessions:
-            sessions.pop(sender, None)
-            save_json(SESSIONS_FILE, sessions)
-        return pick_response(intent)
-
-    return pick_response("unknown")
+    except Exception as e:
+        logging.error(f"[HANDLE ERROR] sender={sender} text={text!r} error={e}", exc_info=True)
+        return ERROR_FALLBACK
 
 # ============================================================
-# 🌐  ROUTES
+# FLASK ROUTES
 # ============================================================
-@app.route("/", methods=["GET"])
+@app.route("/", methods=["GET", "HEAD"])
 def home():
-    try: return send_from_directory('dist', 'index.html')
-    except: return "<h2>✅ VIP Numbers Bot — React App Running</h2>", 200
+    if request.method == "HEAD":
+        return Response(status=200)
+    stats = get_stats()
+    return jsonify({
+        "status":  "online",
+        "agent":   "Nessrine — VIP Numbers Morocco",
+        "version": "8.0",
+        "ai":      "NVIDIA NIM 2000 tokens",
+        "mongodb": "connected" if get_db() else "file-fallback",
+        "leads":   stats["leads"],
+        "orders":  stats["orders"]
+    }), 200
+
 
 @app.route("/health")
 def health():
-    avail = len([n for n in get_all_numbers() if n.get('status','available') == 'available'])
-    config_status = "✅" if (ACCESS_TOKEN and PHONE_NUMBER_ID) else "❌"
+    db    = get_db()
+    stats = get_stats()
     return jsonify({
-        "status": "ok", 
-        "bot": "VIP Numbers Bot", 
-        "ai": "disabled (responses.json)", 
-        "numbers_available": avail, 
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "config": config_status,
-        "access_token_set": bool(ACCESS_TOKEN),
-        "phone_number_id": PHONE_NUMBER_ID,
-        "webhook_url": f"{CATALOG_URL}/webhook"
+        "status":  "ok",
+        "agent":   "Nessrine v8.0",
+        "mongodb": "connected" if db else "file-fallback",
+        "nvidia":  "configured" if NVIDIA_API_KEY else "missing",
+        "groq":    "configured" if GROQ_API_KEY else "missing",
+        "keep_alive": True,
+        "stats":   stats,
+        "time":    datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }), 200
-
-def require_auth(f):
-    @functools.wraps(f)
-    def decorated(*args, **kwargs):
-        auth = request.authorization
-        if not auth or auth.username != DASHBOARD_USER or auth.password != DASHBOARD_PASS:
-            return Response("🔒 Access Denied.", 401, {"WWW-Authenticate": 'Basic realm="VIP Admin"'})
-        return f(*args, **kwargs)
-    return decorated
-
-@app.route("/logs", methods=["GET"])
-@require_auth
-def view_logs():
-    """View recent bot logs (admin only)"""
-    try:
-        lines = request.args.get("lines", 50, type=int)
-        if os.path.exists(_log_path):
-            with open(_log_path, "r", encoding="utf-8") as f:
-                all_lines = f.readlines()
-                recent = all_lines[-lines:] if lines else all_lines
-                return f"<pre>{html.escape(''.join(recent))}</pre>", 200
-        return "<p>No logs found</p>", 200
-    except Exception as e:
-        return f"<p>Error: {e}</p>", 500
-
-@app.route("/test", methods=["POST"])
-def test_webhook():
-    """Test endpoint - simulate WhatsApp message for debugging"""
-    try:
-        data = request.get_json(force=True)
-        test_phone = data.get("phone", "212638388885").replace("+", "")
-        test_message = data.get("message", "سلام").strip()
-        
-        logging.info(f"🧪 [TEST] Simulating message from {test_phone}: {test_message}")
-        
-        # Simulate webhook message
-        reply = handle_logic(test_phone, test_message) or ""
-        
-        # Actually send it via WhatsApp
-        send_status = send_whatsapp(test_phone, reply) if reply else False
-        
-        return jsonify({
-            "ok": True,
-            "message_sent": send_status,
-            "reply": reply,
-            "test_phone": test_phone
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
-    """WhatsApp Cloud API Webhook"""
-    # ── GET: Verification handshake ──────────────────────────────────────────
+    # ── GET: Meta verification ──
     if request.method == "GET":
-        try:
-            mode      = request.args.get("hub.mode")
-            token     = request.args.get("hub.verify_token")
-            challenge = request.args.get("hub.challenge")
-            verify_token = VERIFY_TOKEN  # already loaded at startup
-            if mode and token:
-                if mode == "subscribe" and token == verify_token:
-                    logging.info("✅ [WEBHOOK] Verification successful!")
-                    return challenge, 200
-                else:
-                    logging.warning(f"❌ [WEBHOOK] Invalid verify token received: '{token}'")
-                    return "Forbidden", 403
-            return "Webhook is active", 200
-        except Exception as e:
-            logging.error(f"❌ [WEBHOOK GET] Exception: {e}")
-            return "Internal Server Error", 500
+        mode      = request.args.get("hub.mode")
+        token     = request.args.get("hub.verify_token")
+        challenge = request.args.get("hub.challenge")
+        if mode == "subscribe" and token == VERIFY_TOKEN:
+            logging.info("✅ [WEBHOOK] Meta verified")
+            return challenge, 200
+        return "Forbidden", 403
 
-    # ── POST: Incoming message ───────────────────────────────────────────────
+    # ── POST: Incoming message ──
     try:
-        data = request.get_json(force=True)
-        logging.info(f"📥 [WEBHOOK RAW] {str(data)[:300]}...")
-
-        if not (data and 'entry' in data):
+        data = request.get_json(force=True, silent=True)
+        if not data or "entry" not in data:
             return "ok", 200
 
-        changes = data['entry'][0].get('changes', [{}])
-        value   = changes[0].get('value', {})
-        messages = value.get('messages')
+        changes  = data["entry"][0].get("changes", [{}])
+        value    = changes[0].get("value", {})
+        messages = value.get("messages")
         if not messages:
             return "ok", 200
 
         msg    = messages[0]
-        msg_id = msg.get('id', '')
+        msg_id = msg.get("id", "")
 
-        # ── De-duplicate: skip already-processed messages ──
-        with shared_lock:
-            if msg_id in processed_messages:
-                logging.info(f"⏭️  [WEBHOOK] Already processed: {msg_id}")
+        # Dedup
+        with _lock:
+            if msg_id in processed_ids:
                 return "ok", 200
-            # Mark as processed BEFORE handling (prevents race condition)
-            processed_messages[msg_id] = True
-            if len(processed_messages) > MAX_PROCESSED_MESSAGES:
-                processed_messages.popitem(last=False)
+            processed_ids[msg_id] = True
+            if len(processed_ids) > 2000:
+                processed_ids.popitem(last=False)
 
-        sender = "".join(filter(str.isdigit, msg['from']))
+        sender   = "".join(filter(str.isdigit, msg.get("from", "")))
+        msg_type = msg.get("type", "")
 
-        # ── Alert admin about every non-admin message ──
-        if sender != ADMIN_PHONE:
-            if msg.get('type') == 'text':
-                body_preview = msg['text']['body'][:100]
-                alert_msg = (
-                    f"🚨 رسالة جديدة من: {sender}\n"
-                    f"الرسالة: {body_preview}\n"
-                    f"تواصل: https://wa.me/{sender}"
+        if msg_type == "text":
+            body = msg["text"]["body"]
+
+            def _process():
+                reply = handle_logic(sender, body)
+                if reply:
+                    send_text(sender, reply)
+
+            executor.submit(_process)
+
+        elif msg_type in ("image", "document", "audio", "video", "sticker"):
+            if sender != ADMIN_PHONE:
+                executor.submit(send_text, ADMIN_PHONE,
+                    f"📎 ميديا من {sender}: {msg_type}\nhttps://wa.me/{sender}"
                 )
-            else:
-                alert_msg = (
-                    f"🚨 ميديا جديدة من: {sender}\n"
-                    f"النوع: {msg.get('type')}\n"
-                    f"تواصل: https://wa.me/{sender}"
+                executor.submit(send_text, sender,
+                    "شكراً خويا! 📸 ما نقدرش نقرا الملفات للأسف.\n"
+                    "صيفط رسالة نصية باش نكملو 😊"
                 )
-            send_whatsapp_async(ADMIN_PHONE, alert_msg)
-            logging.info(f"[SYSTEM] Lead alert sent to {ADMIN_PHONE} for {sender}")
-
-        # ── Process message ──
-        if msg.get('type') == 'text':
-            reply = handle_logic(sender, msg['text']['body'])
-            if reply:
-                send_whatsapp_async(sender, reply)
-        elif msg.get('type') in ('image', 'document', 'audio', 'video', 'sticker'):
-            notify_admin_media(sender, msg.get('type'))
-            reply = pick_response("media_received")
-            if reply:
-                send_whatsapp_async(sender, reply)
 
         return "ok", 200
 
     except Exception as e:
-        logging.error(f"❌ [WEBHOOK POST ERROR]: {e}")
-        import traceback
-        logging.error(traceback.format_exc())
-        # Always return 200 so Meta does not retry in a loop
+        logging.error(f"[WEBHOOK ERROR] {e}", exc_info=True)
         return "ok", 200
+
+
+@app.route("/test", methods=["POST"])
+def test_endpoint():
+    """Test: simulate WhatsApp message and send reply"""
+    try:
+        data    = request.get_json(force=True)
+        phone   = "".join(filter(str.isdigit, data.get("phone", ADMIN_PHONE)))
+        message = data.get("message", "سلام")
+
+        reply  = handle_logic(phone, message) or ""
+        sent   = send_text(phone, reply) if reply else False
+
+        return jsonify({"ok": True, "reply": reply, "sent": sent, "phone": phone})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/catalog-test")
+def catalog_test():
+    """Send catalog images to admin"""
+    phone = request.args.get("phone", ADMIN_PHONE)
+    executor.submit(send_catalog_images, phone)
+    return jsonify({"ok": True, "sent_to": phone})
+
+
+@app.route("/state")
+def view_state():
+    stats = get_stats()
+    return jsonify({
+        "agent":   "Nessrine v8.0",
+        "mongodb": "connected" if get_db() else "file-fallback",
+        "stats":   stats
+    })
+
+# ============================================================
+# KEEP-ALIVE — self-ping every 14 min (prevents Render sleep)
+# ============================================================
+def _keep_alive():
+    time.sleep(90)  # Give gunicorn time to start fully
+    while True:
+        try:
+            r = requests.get(f"{SERVICE_URL}/health", timeout=15)
+            logging.info(f"[KEEP-ALIVE] ✅ {r.status_code}")
+        except Exception as e:
+            logging.warning(f"[KEEP-ALIVE] ⚠️ {e}")
+        time.sleep(14 * 60)  # 14 minutes
+
+threading.Thread(target=_keep_alive, daemon=True, name="keep-alive").start()
+logging.info("🚀 [BOOT] Keep-alive thread started (ping every 14 min)")
+
+# ============================================================
+# MAIN
+# ============================================================
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    logging.info(f"[BOOT] Nessrine v8.0 — 0.0.0.0:{port}")
+    app.run(host="0.0.0.0", port=port, debug=False)

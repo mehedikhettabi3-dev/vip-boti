@@ -600,7 +600,7 @@ def handle_admin(sender, text):
             f"⏳ Sessions actives: {s['sessions']}\n"
             f"🤖 NVIDIA: {'✅' if NVIDIA_API_KEY else '❌'}\n"
             f"🔄 Groq: {'✅' if GROQ_API_KEY else '❌'}\n"
-            f"🍃 MongoDB: {'✅' if get_db() else '📁 file'}"
+            f"🍃 MongoDB: {'✅' if get_db() is not None else '📁 file'}"
         )
 
     if cmd == "!catalog":
@@ -828,7 +828,7 @@ def home():
         "agent":   "Nessrine — VIP Numbers Morocco",
         "version": "8.0",
         "ai":      "NVIDIA NIM 2000 tokens",
-        "mongodb": "connected" if get_db() else "file-fallback",
+        "mongodb": "connected" if get_db() is not None else "file-fallback",
         "leads":   stats["leads"],
         "orders":  stats["orders"]
     }), 200
@@ -944,7 +944,7 @@ def view_state():
     stats = get_stats()
     return jsonify({
         "agent":   "Nessrine v8.0",
-        "mongodb": "connected" if get_db() else "file-fallback",
+        "mongodb": "connected" if get_db() is not None else "file-fallback",
         "stats":   stats
     })
 

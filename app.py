@@ -55,14 +55,16 @@ user_states = {}
 # ============================================================
 VIP_MEGA_DICTIONARY = {
     "demand_intent": re.compile(
-        r'\b(bgh?it|bghiti|brit|b4it|bght|khasni|khassni|kn9lb|n9lb|bari|'
+        r'\b(bgh?it|bghiti|bghina|brit|b4it|bght|khasni|khassni|kn9lb|n9lb|bari|baghi|'
+        r'bghit\s*nechri|nir\s*brit|andi\s*gharad|mohim\s*brit|'
         r'sift|sft|3tini|3etini|a3tini|'
-        r'بغيت|بغيتي|باغي|بريت|بغت|خصني|كنقلب|محوج|محتاج|'
-        r'صيفط|سيفط|عطيني|اعطيني)\b', re.I
+        r'بغيت|بغيتي|بغينا|باغي|بريت|بغت|خصني|كنقلب|محوج|محتاج|'
+        r'بغيت\s*نشري|غير\s*بريت|عندي\s*غرض|المهم\s*بريت|اريد|'
+        r'صيفط|سيفط|عطيني|اعطيني|نشري)\b', re.I
     ),
     "availability": re.compile(
-        r'\b(wach\s*k[ai]yn?|wach\s*3end[kc]om|k[ai]yn?\s*chi|b9at\s*chi|dispo|'
-        r'واش\s*كاين|واش\s*عندكم|كاين\s*شي|كاينة\s*شي|عندكم|بقات)\b', re.I
+        r'\b(wach\s*k[ai]yn?|wach\s*kine|wach\s*3end[kc]om|k[ai]yn?\s*chi|b9at\s*chi|dispo|'
+        r'واش\s*كاين|واش\s*متوفر|واش\s*عندكم|كاين\s*شي|كاينة\s*شي|عندكم|بقات)\b', re.I
     ),
     "catalog": re.compile(
         r'\b(nmra|nmera|nemra|nwamer|nwamar|nwamr|nmari|ra9m|r9m|'
@@ -76,29 +78,30 @@ VIP_MEGA_DICTIONARY = {
         r'100\s*dh|135\s*dh|150\s*dh|كلسي|katklsi)\b', re.I
     ),
     "operator": re.compile(
-        r'\b(iam|maroc\s*telecom|ittissalat|orange|méditel|meditel|inwi|wana|'
-        r'اتصالات|اورانج|اورنج|انوي|ريزو|الشبكة|المشغل)\b', re.I
+        r'\b(iam|maroc\s*telecom|ittissalat|itisalat|orange|méditel|meditel|inwi|wana|reseau|'
+        r'ina\s*reseau|achmn\s*reseau|'
+        r'اتصالات|اتصالات\s*المغرب|اورانج|اورنج|انوي|ريزو|الشبكة|المشغل|اشمن\s*ريزو)\b', re.I
     ),
     "registration": re.compile(
-        r'\b(smiti|smit|smia|ismi|ism|kifach\s*tsjel|kifach\s*doz|contrat|'
+        r'\b(smiti|smit|smia|ismi|ism|kifach\s*tsjel|kifach\s*doz|contrat|la\s*carte|'
         r'carte\s*bancaire|activation|'
-        r'سميتي|سمية|الاسم|اسمي|كيفاش\s*تسجل|كونطرا|عقد|تسجيل|تفعيل)\b', re.I
+        r'سميتي|بسميتي|سمية|الاسم|اسمي|كيفاش\s*تسجل|كونطرا|عقد|تسجيل|تفعيل)\b', re.I
     ),
     "delivery": re.compile(
-        r'\b(tawsil|livraison|kifach\s*nkhls|kifach\s*ntwasel|nkhls|'
-        r'توصيل|كيفاش|التوصيل|الخلاص|الكاش|المانة|فين\s*نوصل)\b', re.I
+        r'\b(tawsil|livraison|kifach\s*tawsil|kifach\s*nkhls|kifach\s*ntwasel|nkhls|'
+        r'توصيل|كيفاش\s*التوصيل|التوصيل|الخلاص|الكاش|المانة|فين\s*نوصل)\b', re.I
     ),
     "greeting": re.compile(
         r'\b(salam|slm|ahlan|ahlan|slaaaam|مرحبا|السلام|سلام|أهلا|اهلا|bonjour|salut|hi|hello|hey)\b', re.I
     ),
     "thanks": re.compile(
-        r'\b(shukran|choukran|merci|mrc|thanks|شكرا|merci)\b', re.I
+        r'\b(shukran|choukran|merci|mrc|thanks|شكرا)\b', re.I
     ),
     "cancel": re.compile(
         r'\b(l[ai]|non|no|mabghitch|mabghitx|إلغاء|لا|مابغيتش|خلاص|stop|cancel|annuler)\b', re.I
     ),
     "trust": re.compile(
-        r'\b(garantie|garantir|sérieux|sérieuse|legit|serious|ثقة|مضمون|sérieux)\b', re.I
+        r'\b(garantie|garantir|sérieux|sérieuse|legit|serious|ثقة|مضمون)\b', re.I
     ),
     "bargain": re.compile(
         r'\b(ghali|rkhis|r5is|na9s|tna9so|discount|تخفيض|غالي|رخيص|نقص|تنقصو)\b', re.I
@@ -417,88 +420,102 @@ def run_state_machine(sender, text):
 # ============================================================
 # MAIN LOGIC
 # ============================================================
+ERROR_MESSAGE = (
+    "⚠️ *النظام مزدحم حالياً* 🤖\n\n"
+    "المرجو ترك رسالة في هذا الرقم، فالنظام لا يعمل حالياً بسبب كثرة الرسائل.\n"
+    "سيتم الرد عليك في أقرب وقت ممكن.\n\n"
+    "⚠️ *Système surchargé* 🤖\n\n"
+    "Veuillez laisser un message à ce numéro, le système ne fonctionne pas "
+    "actuellement en raison du grand nombre de messages.\n"
+    "Nous vous répondrons dès que possible."
+)
+
 def handle_logic(sender, text):
-    t = text.strip()
-    t_lower = t.lower()
+    try:
+        t = text.strip()
+        t_lower = t.lower()
 
-    # ── CHECK ACTIVE STATE MACHINE ──────────────────────────
-    if sender in user_states:
-        reply = run_state_machine(sender, t)
-        if reply: return reply
-        # If state machine returns None, fall through
+        # ── CHECK ACTIVE STATE MACHINE ──────────────────────────
+        if sender in user_states:
+            reply = run_state_machine(sender, t)
+            if reply: return reply
+            # If state machine returns None, fall through
 
-    # ── PRIORITY 1: User sent a phone number directly → START CAPTURE with number
-    num = extract_moroccan_number(t)
-    if num and is_vip_number(num):
-        user_states[sender] = {"step": 1, "data": {"vip_number": num}}
-        return f"🎯 النمرة: *{num}*\nما هو اسمك الكريم؟ 🖊️"
+        # ── PRIORITY 1: User sent a phone number directly → START CAPTURE with number
+        num = extract_moroccan_number(t)
+        if num and is_vip_number(num):
+            user_states[sender] = {"step": 1, "data": {"vip_number": num}}
+            return f"🎯 النمرة: *{num}*\nما هو اسمك الكريم؟ 🖊️"
 
-    # ── DETECT INTENT FROM MEGA-DICTIONARY ──────────────────
-    intents = detect_intent(t)
+        # ── DETECT INTENT FROM MEGA-DICTIONARY ──────────────────
+        intents = detect_intent(t)
 
-    # ── ROUTE BY INTENT ─────────────────────────────────────
-    # URLs: skip intent routing, just welcome
-    if t.startswith("http://") or t.startswith("https://") or t.startswith("www."):
+        # ── ROUTE BY INTENT ─────────────────────────────────────
+        # URLs: skip intent routing, just welcome
+        if t.startswith("http://") or t.startswith("https://") or t.startswith("www."):
+            return response_welcome()
+
+        invalid_prices = re.search(r'\b(200|50|30|20|10)\s*(dh|درهم)\b', t, re.I)
+
+        # If the user asks about a specific operator, show operator info
+        if "operator" in intents:
+            return response_operators()
+
+        # 1. Explicit buy / demand / number query → START CAPTURE
+        if "demand_intent" in intents or "availability" in intents:
+            if invalid_prices and not num:
+                return ("⚠️ *هاد الثمن غير متوفر!* الأثمنة اللي عندنا:\n\n"
+                        "🔹 *100 DH*\n🔹 *135 DH*\n🔹 *150 DH*\n\n"
+                        "بغيتي تشوف النوامر المتوفرة؟ صيفط *نوامر* 🚀")
+            user_states[sender] = {"step": 0, "data": {}}
+            return "🎯 ما هو رقم VIP اللي باغي تدخل عليه؟ 🤝"
+
+        # 3. Registration / activation / payment method question
+        if "registration" in intents:
+            return response_registration()
+
+        # 5. Catalog request
+        if "catalog" in intents:
+            return response_catalog()
+
+        # 6. Pricing
+        if "budget_pricing" in intents:
+            return response_pricing()
+
+        # 7. Delivery / payment question
+        if "delivery" in intents:
+            return response_delivery()
+
+        # 8. Trust / guarantee question
+        if "trust" in intents:
+            return response_trust()
+
+        # 9. Bargaining
+        if "bargain" in intents:
+            return response_bargain()
+
+        # 10. Greeting
+        if "greeting" in intents:
+            return response_welcome()
+
+        # 11. Thanks
+        if "thanks" in intents:
+            return "العفو خويا! الله يبارك فيك 😊 ديما فالخدمة 👑"
+
+        # 12. Cancel — clean up state
+        if "cancel" in intents:
+            user_states.pop(sender, None)
+            return "واخا، تم الإلغاء. إلا بغيتي شي حاجة أخرى، أنا هنا 😊"
+
+        # ── NVIDIA RAG FALLBACK (general questions only) ────────
+        if NVIDIA_API_KEY:
+            answer = ask_nvidia(t)
+            if answer: return answer
+
         return response_welcome()
-
-    invalid_prices = re.search(r'\b(200|50|30|20|10)\s*(dh|درهم)\b', t, re.I)
-
-    # If the user asks about a specific operator, show operator info
-    if "operator" in intents:
-        return response_operators()
-
-    # 1. Explicit buy / demand / number query → START CAPTURE
-    if "demand_intent" in intents or "availability" in intents:
-        if invalid_prices and not num:
-            return ("⚠️ *هاد الثمن غير متوفر!* الأثمنة اللي عندنا:\n\n"
-                    "🔹 *100 DH*\n🔹 *135 DH*\n🔹 *150 DH*\n\n"
-                    "بغيتي تشوف النوامر المتوفرة؟ صيفط *نوامر* 🚀")
-        user_states[sender] = {"step": 0, "data": {}}
-        return "🎯 ما هو رقم VIP اللي باغي تدخل عليه؟ 🤝"
-
-    # 3. Registration / activation / payment method question
-    if "registration" in intents:
-        return response_registration()
-
-    # 5. Catalog request
-    if "catalog" in intents:
-        return response_catalog()
-
-    # 6. Pricing
-    if "budget_pricing" in intents:
-        return response_pricing()
-
-    # 7. Delivery / payment question
-    if "delivery" in intents:
-        return response_delivery()
-
-    # 8. Trust / guarantee question
-    if "trust" in intents:
-        return response_trust()
-
-    # 9. Bargaining
-    if "bargain" in intents:
-        return response_bargain()
-
-    # 10. Greeting
-    if "greeting" in intents:
-        return response_welcome()
-
-    # 11. Thanks
-    if "thanks" in intents:
-        return "العفو خويا! الله يبارك فيك 😊 ديما فالخدمة 👑"
-
-    # 12. Cancel — clean up state
-    if "cancel" in intents:
-        user_states.pop(sender, None)
-        return "واخا، تم الإلغاء. إلا بغيتي شي حاجة أخرى، أنا هنا 😊"
-
-    # ── NVIDIA RAG FALLBACK (general questions only) ────────
-    if NVIDIA_API_KEY:
-        answer = ask_nvidia(t)
-        if answer: return answer
-
-    return response_welcome()
+    except Exception as e:
+        logging.error(f"[HANDLE ERROR] sender={sender} text={text!r} error={e}")
+        return ERROR_MESSAGE
 
 # ============================================================
 # FLASK ROUTES

@@ -60,7 +60,7 @@ logging.basicConfig(
 
 app      = Flask(__name__, static_folder="static", static_url_path="/static")
 CORS(app)
-executor = ThreadPoolExecutor(max_workers=8)
+executor = ThreadPoolExecutor(max_workers=16)
 _lock    = threading.Lock()
 processed_ids = OrderedDict()
 
@@ -300,10 +300,10 @@ def _send_wa(to, payload):
         )
         ok = r.status_code in (200, 201)
         if not ok:
-            logging.error(f"[SEND FAIL] {r.status_code} → {r.text[:300]}")
+            logging.error(f"❌ [META SEND FAIL] To: {to} | Status: {r.status_code} | Body: {r.text[:500]}")
         return ok
     except Exception as e:
-        logging.error(f"[SEND ERROR] {e}")
+        logging.error(f"❌ [META SEND EXCEPTION] To: {to} | Error: {e}")
         return False
 
 def send_text(to, text):
@@ -407,7 +407,7 @@ def ask_nvidia(messages):
                 "max_tokens": 2000,
                 "top_p": 0.9
             },
-            timeout=25
+            timeout=10
         )
         if r.status_code == 200:
             return r.json()["choices"][0]["message"]["content"].strip()
@@ -452,7 +452,7 @@ def ask_gemini(messages):
             f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}",
             json=payload,
             headers={"Content-Type": "application/json"},
-            timeout=20
+            timeout=8
         )
         if r.status_code == 200:
             res_data = r.json()
@@ -481,7 +481,7 @@ def ask_groq(messages):
                 "temperature": 0.7,
                 "max_tokens": 1024
             },
-            timeout=15
+            timeout=6
         )
         if r.status_code == 200:
             return r.json()["choices"][0]["message"]["content"].strip()
@@ -508,7 +508,7 @@ def ask_openrouter(messages):
                 "temperature": 0.75,
                 "max_tokens": 1000
             },
-            timeout=20
+            timeout=8
         )
         if r.status_code == 200:
             return r.json()["choices"][0]["message"]["content"].strip()
@@ -1072,11 +1072,34 @@ def webhook():
             body = msg["text"]["body"]
 
             def _process():
-                reply = handle_logic(sender, body)
-                if reply:
-                    send_text(sender, reply)
+                try:
+                    reply = handle_logic(sender, body)
+                    if reply:
+                        send_text(sender, reply)
+                except Exception as e:
+                    logging.error(f"❌ [WEBHOOK PROCESS ERROR] sender={sender} error={e}", exc_info=True)
+                    send_text(sender, ERROR_FALLBACK)
 
             executor.submit(_process)
+
+        elif msg_type in ("interactive", "button"):
+            interactive = msg.get("interactive", {}) or msg.get("button", {})
+            body = (
+                interactive.get("button_reply", {}).get("title") or 
+                interactive.get("list_reply", {}).get("title") or 
+                msg.get("button", {}).get("text") or ""
+            )
+            if body:
+                def _process_btn():
+                    try:
+                        reply = handle_logic(sender, body)
+                        if reply:
+                            send_text(sender, reply)
+                    except Exception as e:
+                        logging.error(f"❌ [WEBHOOK BTN ERROR] sender={sender} error={e}", exc_info=True)
+                        send_text(sender, ERROR_FALLBACK)
+
+                executor.submit(_process_btn)
 
         elif msg_type in ("image", "document", "audio", "video", "sticker"):
             if sender != ADMIN_PHONE:
